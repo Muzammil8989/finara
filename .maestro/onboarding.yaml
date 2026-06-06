@@ -1,0 +1,21 @@
+appId: com.anonymous.Wealthflow
+---
+- launchApp:
+    clearState: true
+
+# Wait for onboarding screen
+- assertVisible: "Get Started"
+
+# Enter name
+- tapOn: "Your Name"
+- inputText: "Test User"
+
+# Select currency
+- tapOn: "Currency"
+- tapOn: "USD"
+
+# Proceed
+- tapOn: "Get Started"
+
+# Should land on dashboard
+- assertVisible: "Overview"

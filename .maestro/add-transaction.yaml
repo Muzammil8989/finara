@@ -1,0 +1,37 @@
+appId: com.anonymous.Wealthflow
+---
+- launchApp
+
+# Open add transaction modal via FAB
+- tapOn:
+    id: "fab-add-button"
+
+- assertVisible: "Add Transaction"
+
+# Select expense type
+- tapOn: "Expense"
+
+# Enter amount
+- tapOn:
+    id: "amount-input"
+- inputText: "500"
+
+# Select category
+- tapOn: "Category"
+- tapOn: "Food"
+
+# Select account
+- tapOn: "Account"
+- tapOn: "Main Wallet"
+
+# Add note
+- tapOn:
+    id: "note-input"
+- inputText: "Lunch"
+
+# Save
+- tapOn: "Save"
+
+# Transaction should appear in list
+- assertVisible: "500"
+- assertVisible: "Lunch"

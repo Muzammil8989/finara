@@ -1,0 +1,81 @@
+{
+  "expo": {
+    "name": "Finara",
+    "slug": "Finara",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "finara",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "icon": "./assets/images/icon.png"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.Finara"
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#246BFD"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/android-icon-foreground.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#246BFD",
+          "dark": {
+            "image": "./assets/images/android-icon-foreground.png",
+            "backgroundColor": "#1E56D8"
+          }
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
+            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.ttf",
+            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.ttf",
+            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome.ttf",
+            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Feather.ttf",
+            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/AntDesign.ttf",
+            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Entypo.ttf"
+          ]
+        }
+      ],
+      "expo-sqlite",
+      "expo-secure-store",
+      "@react-native-community/datetimepicker",
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a8264ff2-eadb-44d1-b1af-9862f7e2aaef"
+      }
+    },
+    "owner": "muzammil89890"
+  }
+}

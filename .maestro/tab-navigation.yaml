@@ -1,0 +1,22 @@
+appId: com.anonymous.Wealthflow
+---
+- launchApp
+
+# Verify all 5 tabs are accessible
+- assertVisible: "Overview"
+
+- tapOn: "Activity"
+- assertVisible: "Transactions"
+
+- tapOn: "Budget"
+- assertVisible: "Budget"
+
+- tapOn: "Savings"
+- assertVisible: "Savings"
+
+- tapOn: "Reports"
+- assertVisible: "Reports"
+
+# Return to Overview
+- tapOn: "Overview"
+- assertVisible: "Overview"

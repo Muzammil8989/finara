@@ -1,0 +1,183 @@
+import { getDb } from '@/lib/db/db-client';
+import { logger } from '@/lib/logger';
+import { toast } from '@/lib/toast';
+import { createTransaction } from '@/lib/db/queries';
+import { NotificationService } from '@/services/notification-service';
+import { accounts, categories, transactions as transactionsTable } from '@/lib/db/schema';
+import { and, desc, eq, gte, like, lte, or } from 'drizzle-orm';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+export interface Transaction {
+    id: number;
+    category_id: number;
+    account_id: number;
+    amount: number;
+    category: string;
+    categoryIcon?: string;
+    categoryColor?: string;
+    paymentMethod?: string;
+    note: string | null;
+    type: 'income' | 'expense';
+    date: string | null;
+    accountName?: string;
+}
+
+export interface TransactionFilters {
+    searchQuery?: string;
+    categoryId?: number;
+    categoryName?: string;
+    type?: 'income' | 'expense';
+    startDate?: string;
+    endDate?: string;
+}
+
+export function useTransactions(filters?: TransactionFilters) {
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
+    const mountedRef = useRef(true);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => { mountedRef.current = false; };
+    }, []);
+
+    const fetchTransactions = useCallback(async () => {
+        try {
+            setLoading(true);
+            setError(null);
+            const db = getDb();
+
+            const result = await db
+                .select({
+                    id: transactionsTable.id,
+                    category_id: transactionsTable.category_id,
+                    account_id: transactionsTable.account_id,
+                    amount: transactionsTable.amount,
+                    note: transactionsTable.notes,
+                    type: transactionsTable.type,
+                    date: transactionsTable.date,
+                    categoryName: categories.name,
+                    categoryIcon: categories.icon,
+                    categoryColor: categories.color,
+                    paymentMethod: categories.payment_method,
+                    accountName: accounts.name,
+                })
+                .from(transactionsTable)
+                .leftJoin(categories, eq(transactionsTable.category_id, categories.id))
+                .leftJoin(accounts, eq(transactionsTable.account_id, accounts.id))
+                .where(
+                    and(
+                        filters?.searchQuery
+                            ? or(
+                                like(transactionsTable.notes, `%${filters.searchQuery}%`),
+                                like(categories.name, `%${filters.searchQuery}%`)
+                            )
+                            : undefined,
+                        filters?.categoryId
+                            ? eq(transactionsTable.category_id, filters.categoryId)
+                            : undefined,
+                        filters?.categoryName
+                            ? eq(categories.name, filters.categoryName)
+                            : undefined,
+                        filters?.type
+                            ? eq(transactionsTable.type, filters.type)
+                            : undefined,
+                        filters?.startDate
+                            ? gte(transactionsTable.date, filters.startDate)
+                            : undefined,
+                        filters?.endDate
+                            ? lte(transactionsTable.date, filters.endDate)
+                            : undefined
+                    )
+                )
+                .orderBy(desc(transactionsTable.date), desc(transactionsTable.id));
+
+            if (!mountedRef.current) return;
+
+            const mappedTransactions: Transaction[] = result.map((t) => ({
+                id: t.id,
+                category_id: t.category_id,
+                account_id: t.account_id,
+                amount: t.amount,
+                category: t.categoryName || 'Uncategorized',
+                categoryIcon: t.categoryIcon || undefined,
+                categoryColor: t.categoryColor || undefined,
+                paymentMethod: t.paymentMethod || undefined,
+                note: t.note,
+                type: t.type as 'income' | 'expense',
+                date: t.date,
+                accountName: t.accountName || undefined,
+            }));
+
+            setTransactions(mappedTransactions);
+        } catch (e) {
+            logger.error('Failed to fetch transactions', e);
+            if (mountedRef.current) {
+                setError(e instanceof Error ? e : new Error('Failed to fetch transactions'));
+            }
+        } finally {
+            if (mountedRef.current) {
+                setLoading(false);
+            }
+        }
+    }, [filters?.searchQuery, filters?.categoryId, filters?.categoryName, filters?.type, filters?.startDate, filters?.endDate]);
+
+    const addTransaction = async (tx: Omit<Transaction, 'id' | 'date' | 'accountName'> & { account_id?: number }): Promise<boolean> => {
+        try {
+            const db = getDb();
+
+            // Find category ID
+            const categoryResult = await db
+                .select({ id: categories.id })
+                .from(categories)
+                .where(eq(categories.name, tx.category))
+                .limit(1);
+
+            if (categoryResult.length === 0) {
+                toast.error('Category not found', `"${tx.category}" does not exist`);
+                return false;
+            }
+            const categoryId = categoryResult[0].id;
+
+            // Get default account if none provided
+            let accountId = tx.account_id;
+            if (!accountId) {
+                const accs = await db.select({ id: accounts.id }).from(accounts).limit(1);
+                if (accs.length > 0) accountId = accs[0].id;
+            }
+
+            if (!accountId) {
+                toast.error('No payment method', 'Please create a payment method first');
+                return false;
+            }
+
+            await createTransaction({
+                amount: tx.amount,
+                category_id: categoryId,
+                account_id: accountId,
+                notes: tx.note || null,
+                type: tx.type,
+                date: new Date().toISOString().split('T')[0],
+            });
+
+            // Fire-and-forget budget alert check (only for expenses)
+            if (tx.type === 'expense') {
+                NotificationService.checkAndSendBudgetAlert(categoryId, tx.amount).catch(() => {});
+            }
+
+            await fetchTransactions();
+            return true;
+        } catch (e) {
+            logger.error('Failed to add transaction', e);
+            toast.error('Failed to add transaction');
+            return false;
+        }
+    };
+
+    useEffect(() => {
+        fetchTransactions();
+    }, [fetchTransactions]);
+
+    return { transactions, addTransaction, refresh: fetchTransactions, loading, error };
+}
