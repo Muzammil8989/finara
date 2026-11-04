@@ -23,12 +23,16 @@ export const Pressable = forwardRef<View, PressableProps>(function Pressable(
 ) {
     const [pressed, setPressed] = useState(false);
     const isFn = typeof style === 'function';
+    // A variable, not an inline literal: with Expo's generated expo-env.d.ts
+    // (gitignored, so absent in CI) `hovered` is required; without it, it is
+    // an unknown key that an inline literal would reject.
+    const state = { pressed, hovered: false };
 
     return (
         <RNPressable
             ref={ref}
             {...rest}
-            style={isFn ? style({ pressed, hovered: false }) : style}
+            style={isFn ? style(state) : style}
             onPressIn={(e: GestureResponderEvent) => {
                 if (isFn) setPressed(true);
                 onPressIn?.(e);
