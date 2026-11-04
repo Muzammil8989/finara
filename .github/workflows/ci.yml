@@ -31,7 +31,7 @@ jobs:
         run: npm run typecheck
 
       - name: Run unit & integration tests
-        run: npm test -- --ci --coverage
+        run: npm test -- --ci --coverage --runInBand
 
       - name: Run date tests in several timezones
         run: npm run test:tz
