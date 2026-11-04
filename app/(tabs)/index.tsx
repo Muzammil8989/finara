@@ -11,7 +11,7 @@
  *   tools         Bills, Household, Loans, Accounts, Categories, Export
  */
 
-import { EmptyState, IconSymbol, ProgressRing, Rule, Section, Skeleton, StatFigure, ThemedText } from '@/components/common';
+import { EmptyState, IconSymbol, ProgressRing, Section, Skeleton, StatFigure, ThemedText } from '@/components/common';
 import { useAccounts } from '@/features/accounts/hooks/use-accounts';
 import { BudgetCard } from '@/features/budgets/components/budget-card';
 import { useBudgets } from '@/features/budgets/hooks/use-budgets';
@@ -32,17 +32,7 @@ import { useModals } from '@/providers/modal-context';
 import { Image } from 'expo-image';
 import { type Href, router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { InteractionManager, RefreshControl, View } from 'react-native';
-import Animated, {
-    Extrapolation,
-    interpolate,
-    runOnJS,
-    useAnimatedReaction,
-    useAnimatedScrollHandler,
-    useAnimatedStyle,
-    useSharedValue,
-    type SharedValue,
-} from 'react-native-reanimated';
+import { InteractionManager, RefreshControl, ScrollView, View } from 'react-native';
 import { Pressable } from '@/components/common/pressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -63,77 +53,6 @@ function monthKey(now: Date, delta = 0): string {
 function pctChange(current: number, previous: number): number | null {
     if (previous <= 0) return null;
     return ((current - previous) / previous) * 100;
-}
-
-/** Scroll distance after which the big balance has left the screen. */
-const STICKY_START = 140;
-const STICKY_END = 190;
-
-/**
- * Compact header that slides in once the masthead and balance have scrolled
- * away, so your name and balance stay visible while you read the rest.
- */
-function StickyHeader({
-    scrollY, topInset, name, avatar, balance, onAvatarPress,
-}: {
-    scrollY: SharedValue<number>;
-    topInset: number;
-    name: string;
-    avatar: string | null;
-    balance: string;
-    onAvatarPress: () => void;
-}) {
-    const colors = useThemeColors();
-    const [interactive, setInteractive] = useState(false);
-
-    useAnimatedReaction(
-        () => scrollY.value > STICKY_START + 20,
-        (now, prev) => { if (now !== prev) runOnJS(setInteractive)(now); },
-    );
-
-    const style = useAnimatedStyle(() => ({
-        opacity: interpolate(scrollY.value, [STICKY_START, STICKY_END], [0, 1], Extrapolation.CLAMP),
-        transform: [{ translateY: interpolate(scrollY.value, [STICKY_START, STICKY_END], [-10, 0], Extrapolation.CLAMP) }],
-    }));
-
-    return (
-        <Animated.View
-            pointerEvents={interactive ? 'auto' : 'none'}
-            accessibilityElementsHidden={!interactive}
-            importantForAccessibility={interactive ? 'auto' : 'no-hide-descendants'}
-            style={[
-                {
-                    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
-                    paddingTop: topInset, backgroundColor: colors.background,
-                    borderBottomWidth: 1, borderBottomColor: colors.divider,
-                },
-                style,
-            ]}
-        >
-            <View className="flex-row items-center px-5" style={{ height: 56 }}>
-                <Pressable
-                    onPress={onAvatarPress}
-                    accessibilityRole="button"
-                    accessibilityLabel="Profile and settings"
-                    className="w-9 h-9 rounded-full items-center justify-center overflow-hidden border border-divider dark:border-dark-divider mr-3"
-                    style={{ backgroundColor: colors.surface }}
-                >
-                    {avatar ? (
-                        <Image source={{ uri: avatar }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
-                    ) : (
-                        <IconSymbol name="person.fill" color={colors.textSecondary} size={16} />
-                    )}
-                </Pressable>
-                <ThemedText type="headline" className="flex-1 text-[19px] leading-6" numberOfLines={1}>
-                    {name || 'Overview'}
-                </ThemedText>
-                <View className="items-end ml-3" accessible accessibilityLabel={`Current balance: ${balance}`}>
-                    <ThemedText type="kicker" className="text-[10px] mb-0.5">Balance</ThemedText>
-                    <ThemedText type="figure" className="text-[16px]" numberOfLines={1}>{balance}</ThemedText>
-                </View>
-            </View>
-        </Animated.View>
-    );
 }
 
 function OverviewSkeleton() {
@@ -172,8 +91,6 @@ export default function OverviewScreen() {
     const { budgets, refresh: refreshBudgets } = useBudgets();
     const [monthly, setMonthly] = useState<MonthlyTotals[]>([]);
     const [isRefreshing, setIsRefreshing] = useState(false);
-    const scrollY = useSharedValue(0);
-    const onScroll = useAnimatedScrollHandler({ onScroll: e => { scrollY.value = e.contentOffset.y; } });
 
     const loading = txLoading || goalsLoading;
     const showSkeleton = loading && transactions.length === 0;
@@ -253,23 +170,13 @@ export default function OverviewScreen() {
     const firstName = (profile.name || '').trim().split(/\s+/)[0];
 
     return (
-        <View className="flex-1 bg-background dark:bg-dark-background">
-            {!showSkeleton && (
-                <StickyHeader
-                    scrollY={scrollY}
-                    topInset={insets.top}
-                    name={firstName || profile.name}
-                    avatar={profile.avatar ?? null}
-                    balance={UserService.formatCurrency(stats.balance, currency)}
-                    onAvatarPress={() => router.push('/settings' as Href)}
-                />
-            )}
-            <Animated.ScrollView
+        <View className="flex-1 bg-background dark:bg-dark-background" style={{ paddingTop: insets.top }}>
+            <ScrollView
                 style={{ flex: 1 }}
-                contentContainerStyle={{ paddingTop: insets.top, paddingBottom: insets.bottom + 120 }}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
                 showsVerticalScrollIndicator={false}
-                onScroll={onScroll}
-                scrollEventThrottle={16}
+                // The name + balance band (child 1) pins to the top while scrolling.
+                stickyHeaderIndices={[1]}
                 refreshControl={
                     <RefreshControl
                         refreshing={isRefreshing}
@@ -279,56 +186,74 @@ export default function OverviewScreen() {
                     />
                 }
             >
-                {/* ── Masthead ───────────────────────────────────────────── */}
-                <View className="px-5 pt-4 pb-5 flex-row items-start">
-                    <View className="flex-1 pr-3">
-                        <ThemedText type="kicker" className="mb-1.5">
-                            {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
-                        </ThemedText>
-                        <ThemedText type="display" numberOfLines={2} accessibilityRole="header">
-                            {greeting(new Date())}{firstName ? `,\n${firstName}` : ''}
-                        </ThemedText>
-                    </View>
-                    <Pressable
-                        onPress={() => router.push('/settings' as Href)}
-                        accessibilityRole="button"
-                        accessibilityLabel="Profile and settings"
-                        className="w-12 h-12 rounded-full items-center justify-center overflow-hidden border border-divider dark:border-dark-divider mt-1"
-                        style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, backgroundColor: colors.surface })}
-                    >
-                        {profile.avatar ? (
-                            <Image source={{ uri: profile.avatar }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
-                        ) : (
-                            <IconSymbol name="person.fill" color={colors.textSecondary} size={22} />
-                        )}
-                    </Pressable>
+                {/* 0 ── Masthead (scrolls away) ─────────────────────────── */}
+                <View className="px-5 pt-4 pb-4">
+                    <ThemedText type="kicker" className="mb-1.5">
+                        {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+                    </ThemedText>
+                    <ThemedText type="display" numberOfLines={1} adjustsFontSizeToFit accessibilityRole="header">
+                        {greeting(new Date())}
+                    </ThemedText>
                 </View>
 
+                {/* 1 ── Sticky band: name + balance ─────────────────────── */}
+                <View
+                    className="px-5 pt-3 pb-3 bg-background dark:bg-dark-background border-t-2 border-b border-t-textPrimary dark:border-t-dark-textPrimary border-b-divider dark:border-b-dark-divider"
+                >
+                    <View className="flex-row items-center">
+                        <Pressable
+                            onPress={() => router.push('/settings' as Href)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Profile and settings"
+                            className="w-11 h-11 rounded-full items-center justify-center overflow-hidden border border-divider dark:border-dark-divider mr-3"
+                            style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, backgroundColor: colors.surface })}
+                        >
+                            {profile.avatar ? (
+                                <Image source={{ uri: profile.avatar }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+                            ) : (
+                                <IconSymbol name="person.fill" color={colors.textSecondary} size={20} />
+                            )}
+                        </Pressable>
+                        <View className="flex-1 mr-3">
+                            <ThemedText type="headline" className="text-[20px] leading-7" numberOfLines={1}>
+                                {firstName || profile.name || 'Welcome'}
+                            </ThemedText>
+                            {(stats.income > 0 || stats.expense > 0) ? (
+                                <ThemedText type="caption" numberOfLines={1} style={{ fontVariant: ['tabular-nums'] }}>
+                                    <ThemedText type="caption" style={{ color: stats.net >= 0 ? colors.income : colors.expense, fontVariant: ['tabular-nums'] }}>
+                                        {stats.net >= 0 ? '+' : '−'}{UserService.formatCurrency(Math.abs(stats.net), currency)}
+                                    </ThemedText>
+                                    {' '}this month
+                                </ThemedText>
+                            ) : (
+                                <ThemedText type="caption" numberOfLines={1}>Your money, clearly kept</ThemedText>
+                            )}
+                        </View>
+                        <View
+                            className="items-end"
+                            accessible
+                            accessibilityLabel={showSkeleton ? 'Current Balance: loading' : `Current Balance: ${UserService.formatCurrency(stats.balance, currency)}`}
+                        >
+                            <ThemedText type="kicker" className="mb-0.5">Balance</ThemedText>
+                            {showSkeleton ? (
+                                <Skeleton width={110} height={26} borderRadius={4} />
+                            ) : (
+                                <ThemedText type="figure" className="text-[24px] leading-8" numberOfLines={1} adjustsFontSizeToFit style={{ maxWidth: 190 }}>
+                                    {UserService.formatCurrency(stats.balance, currency)}
+                                </ThemedText>
+                            )}
+                        </View>
+                    </View>
+                </View>
+
+                {/* 2 ── Content ─────────────────────────────────────────── */}
+                <View>
                 {showSkeleton ? (
                     <OverviewSkeleton />
                 ) : (
                     <>
-                        {/* ── Balance ─────────────────────────────────────── */}
-                        <View className="px-5">
-                            <Rule strong className="mb-4" />
-                            <StatFigure
-                                label="Current Balance"
-                                value={UserService.formatCurrency(stats.balance, currency)}
-                                size="lg"
-                            />
-                            {(stats.income > 0 || stats.expense > 0) && (
-                                <ThemedText type="caption" className="mt-1" style={{ fontVariant: ['tabular-nums'] }}>
-                                    <ThemedText type="caption" style={{ color: stats.net >= 0 ? colors.income : colors.expense, fontVariant: ['tabular-nums'] }}>
-                                        {stats.net >= 0 ? '+' : '−'}{UserService.formatCurrency(Math.abs(stats.net), currency)}
-                                    </ThemedText>
-                                    {' '}net this month
-                                </ThemedText>
-                            )}
-                        </View>
-
                         {/* ── This month ──────────────────────────────────── */}
-                        <View className="px-5 mt-6">
-                            <Rule className="mb-4" />
+                        <View className="px-5 mt-5">
                             <ThemedText type="kicker" className="mb-3">
                                 {now.toLocaleDateString(undefined, { month: 'long' })} so far
                             </ThemedText>
@@ -449,7 +374,8 @@ export default function OverviewScreen() {
                         </Section>
                     </>
                 )}
-            </Animated.ScrollView>
+                </View>
+            </ScrollView>
         </View>
     );
 }

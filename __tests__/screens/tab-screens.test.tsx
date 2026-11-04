@@ -54,11 +54,14 @@ describe('Overview', () => {
     expect(await screen.findByLabelText('Current Balance: -$40.00')).toBeTruthy();
   });
 
-  it('has a compact sticky header with the name and balance for when the page is scrolled', async () => {
+  it('pins a band with the name and balance to the top while scrolling', async () => {
     await q.updateAccount(accountId, { balance: 1000 });
     await renderWithProviders(<OverviewScreen />);
-    // Hidden from screen readers until scrolled; query hidden elements too.
-    expect(await screen.findByLabelText('Current balance: $1,000.00', { includeHiddenElements: true })).toBeTruthy();
+    const band = await screen.findByLabelText('Current Balance: $1,000.00');
+    expect(band).toBeTruthy();
+    expect(screen.getByText('Test')).toBeTruthy(); // first name in the band
+    const scroller = screen.UNSAFE_root.findAll((n: { props?: { stickyHeaderIndices?: unknown } }) => Array.isArray(n.props?.stickyHeaderIndices))[0];
+    expect(scroller.props.stickyHeaderIndices).toEqual([1]);
   });
 });
 
