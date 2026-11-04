@@ -98,7 +98,7 @@ const PinDot = memo(({
 
     useEffect(() => {
         scale.value = withTiming(active ? 1.15 : 1, { duration: 200 });
-    }, [active]);
+    }, [active, scale]);
 
     const animatedStyle = useAnimatedStyle(() => ({
         transform: [{ scale: scale.value }],
@@ -157,6 +157,8 @@ export function LockScreen() {
             }
         })();
         return () => { mounted = false; };
+        // Run once on mount: re-running when `unlock` changes would re-prompt biometrics.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const triggerShake = () => {
