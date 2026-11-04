@@ -12,12 +12,12 @@
  *
  * M3 State Layer:
  *   Buttons use Pressable children-as-function with an absolute overlay View
- *   backgroundColor = rgba(36,107,253,0.12) = primary at 12% (M3 pressed state)
+ *   backgroundColor = rgba(13,92,99,0.12) = primary at 12% (pressed state)
  *   NOT active:opacity-60 which changes the whole element's transparency
  */
 
 import * as Haptics from 'expo-haptics';
-import { useSQLiteContext } from 'expo-sqlite';
+import { router } from 'expo-router';
 import React, { memo, useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -35,13 +35,13 @@ import { useAuth } from '@/features/auth/context/auth-context';
 import { useUser } from '@/features/user/context/user-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { shadows } from '@/theme/shadows';
-import { clearDatabase } from '@/lib/db/migrations';
+import { useFactoryReset } from '@/features/auth/hooks/use-factory-reset';
+import { logger } from '@/lib/logger';
 import { SecurityService } from '@/features/auth/services/security-service';
-import { ThemedText } from '@/components/common';
-import { IconSymbol } from '@/components/common';
+import { IconSymbol, ThemedText } from '@/components/common';
 
 // M3 primary at 12% — pressed State Layer color (all platforms)
-const STATE_LAYER_COLOR = 'rgba(36,107,253,0.12)';
+const STATE_LAYER_COLOR = 'rgba(13,92,99,0.12)';
 
 // ─── NumberButton ─────────────────────────────────────────────────────────────
 
@@ -132,9 +132,9 @@ export function LockScreen() {
     const [hasPinSet, setHasPinSet] = useState(true);
     const [bioPref, setBioPref] = useState(false);
     const { unlock } = useAuth();
-    const { profile, updateProfile } = useUser();
+    const { profile } = useUser();
+    const factoryReset = useFactoryReset();
     const colors = useThemeColors();
-    const db = useSQLiteContext();
     const shakeOffset = useSharedValue(0);
 
     // Determine which auth methods are configured, then auto-trigger bio if preferred
@@ -222,9 +222,13 @@ export function LockScreen() {
                     text: 'Reset App & Clear Data',
                     style: 'destructive',
                     onPress: async () => {
-                        await clearDatabase(db);
-                        await SecurityService.clearSecurity();
-                        await updateProfile({ name: '', avatar: null, currency: 'USD', isOnboarded: false });
+                        try {
+                            await factoryReset();
+                            router.replace('/onboarding');
+                        } catch (e) {
+                            logger.error('Forgot-PIN reset failed', e);
+                            Alert.alert('Reset failed', 'Something went wrong while resetting. Please try again.');
+                        }
                     },
                 },
             ],
@@ -243,8 +247,8 @@ export function LockScreen() {
 
                 {/*
                   Logo badge
-                  was: rounded-[28px] magic px + shadow-sm shadow-brand-primary/20 (mixed)
-                  now: rounded-3xl (24dp token) + shadows.sm style prop (theme/shadows.ts)
+                  was: rounded-xl magic px + shadow-sm shadow-brand-primary/20 (mixed)
+                  now: rounded-xl (24dp token) + shadows.sm style prop (theme/shadows.ts)
                 */}
                 <Animated.View
                     entering={FadeInUp.duration(800).springify().damping(15)}
@@ -253,7 +257,7 @@ export function LockScreen() {
                     <IconSymbol name="lock.fill" color={colors.primary} size={48} />
                 </Animated.View>
 
-                <Animated.View entering={FadeIn.delay(200).duration(800)} className="items-center">
+                <Animated.View entering={FadeIn.delay(200).duration(800)} style={{ alignItems: 'center' }}>
                     <ThemedText
                         type="title"
                         className="mb-2 text-3xl text-textPrimary dark:text-dark-textPrimary"
@@ -261,13 +265,13 @@ export function LockScreen() {
                         Welcome back{firstName ? `, ${firstName}` : ''}
                     </ThemedText>
                     <ThemedText className="mb-12 text-base text-textMuted dark:text-dark-textMuted">
-                        {hasPinSet ? 'Enter your passkey to continue' : 'Use biometrics to continue'}
+                        {hasPinSet ? 'Enter your PIN to continue' : 'Use biometrics to continue'}
                     </ThemedText>
                 </Animated.View>
 
                 {/* ── Biometric-only mode ────────────────────────────────── */}
                 {!hasPinSet ? (
-                    <Animated.View entering={FadeInDown.delay(200).duration(500)} className="items-center mb-10">
+                    <Animated.View entering={FadeInDown.delay(200).duration(500)} style={{ alignItems: 'center', marginBottom: 40 }}>
                         <Pressable
                             onPress={handleBio}
                             className="w-28 h-28 items-center justify-center rounded-full bg-brand-primary/10"
@@ -289,7 +293,7 @@ export function LockScreen() {
                             )}
                         </Pressable>
                         {error && (
-                            <ThemedText className="mt-4 text-sm text-error dark:text-dark-error text-center">
+                            <ThemedText className="mt-4 text-sm text-expense dark:text-dark-expense text-center">
                                 Biometric failed. Tap to try again.
                             </ThemedText>
                         )}
@@ -363,7 +367,7 @@ export function LockScreen() {
                                                     pointerEvents="none"
                                                 />
                                             )}
-                                            <IconSymbol name="delete.left.fill" color={colors.error} size={28} />
+                                            <IconSymbol name="delete.left.fill" color={colors.expense} size={28} />
                                         </>
                                     )}
                                 </Pressable>

@@ -13,7 +13,7 @@ jest.mock('@/lib/db/queries', () => ({
     resetHouseholdPeriod: jest.fn(),
 }));
 
-import { useHousehold } from '@/hooks/use-household';
+import { useHousehold } from '@/features/household/hooks/use-household';
 import {
     archiveHouseholdPeriod,
     clearHouseholdExpensesByRange,
@@ -33,12 +33,11 @@ const ORIGINAL_DATE = global.Date;
 function freezeDate(iso: string) {
     const fixed = new ORIGINAL_DATE(iso);
     class FrozenDate extends ORIGINAL_DATE {
-        constructor(...args: ConstructorParameters<typeof ORIGINAL_DATE>) {
+        constructor(...args: unknown[]) {
             if (args.length === 0) {
                 super(fixed.getTime());
             } else {
-                // @ts-expect-error spreading variadic Date args
-                super(...args);
+                super(...(args as [number, number, number]));
             }
         }
         static now() {

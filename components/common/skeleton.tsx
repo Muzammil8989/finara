@@ -1,4 +1,4 @@
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useThemeColors } from '@/hooks/use-theme-colors';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState } from 'react';
 import { DimensionValue, LayoutChangeEvent, View, ViewStyle } from 'react-native';
@@ -6,6 +6,7 @@ import Animated, {
     Easing,
     interpolate,
     useAnimatedStyle,
+    useReducedMotion,
     useSharedValue,
     withRepeat,
     withTiming,
@@ -21,19 +22,20 @@ interface SkeletonProps {
 export function Skeleton({ width = '100%', height = 16, borderRadius = 8, style }: SkeletonProps) {
     const [containerWidth, setContainerWidth] = useState(300);
     const shimmer = useSharedValue(0);
-    const colorScheme = useColorScheme();
-    const isDark = colorScheme === 'dark';
+    const colors = useThemeColors();
+    const reduceMotion = useReducedMotion();
 
-    const baseColor = isDark ? '#1A2235' : '#E8ECF0';
-    const shineColor = isDark ? '#253047' : '#F4F7FA';
+    const baseColor = colors.backgroundAlt;
+    const shineColor = colors.surfaceAlt;
 
     useEffect(() => {
+        if (reduceMotion) return;
         shimmer.value = withRepeat(
             withTiming(1, { duration: 1200, easing: Easing.linear }),
             -1,
             false,
         );
-    }, [shimmer]);
+    }, [shimmer, reduceMotion]);
 
     const animatedStyle = useAnimatedStyle(() => ({
         transform: [{ translateX: interpolate(shimmer.value, [0, 1], [-containerWidth, containerWidth]) }],

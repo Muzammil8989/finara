@@ -1,19 +1,22 @@
-import { AmountInput, AppButton, BottomSheet, BottomSheetRef, SheetHeader, ThemedText } from '@/components/common';
+import { parseAmount } from '@/lib/utils/currency';
+import { AmountInput, AppButton, BottomSheet, BottomSheetRef, SegmentedControl, SheetHeader, ThemedText } from '@/components/common';
 import { CategoryChips } from '@/features/transactions/components/category-chips';
 import { useUser } from '@/features/user/context/user-context';
 import { BudgetWithSpend } from '../hooks/use-budgets';
 import { useCategories } from '@/features/categories/hooks/use-categories';
 import { useThemeColors } from '@/hooks/use-theme-colors';
-import { createBudget, updateBudget } from '@/lib/db/queries';
+import { createBudget, deleteBudget, updateBudget } from '@/lib/db/queries';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
 import { POPULAR_CURRENCIES } from '@/features/user/services/user-service';
 import React, { useEffect, useRef, useState } from 'react';
+import * as Haptics from 'expo-haptics';
 import { Keyboard, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const PERIODS = ['daily', 'weekly', 'monthly', 'yearly'] as const;
 type Period = typeof PERIODS[number];
+const PERIOD_SEGMENTS = PERIODS.map(p => ({ key: p, label: p.charAt(0).toUpperCase() + p.slice(1) }));
 
 interface AddBudgetModalProps {
     visible: boolean;
@@ -32,6 +35,7 @@ export function AddBudgetModal({ visible, onClose, onSuccess, editBudget }: AddB
     const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
     const [period, setPeriod] = useState<Period>('monthly');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [confirmDelete, setConfirmDelete] = useState(false);
     const amountInputRef = useRef<TextInput>(null);
     const sheetRef = useRef<BottomSheetRef>(null);
 
@@ -41,6 +45,7 @@ export function AddBudgetModal({ visible, onClose, onSuccess, editBudget }: AddB
     useEffect(() => {
         if (visible) {
             refreshCategories();
+            setConfirmDelete(false);
             if (editBudget) {
                 setAmount(String(editBudget.amount));
                 setSelectedCategoryId(editBudget.category_id);
@@ -70,7 +75,7 @@ export function AddBudgetModal({ visible, onClose, onSuccess, editBudget }: AddB
     };
 
     const handleSubmit = async () => {
-        const parsedAmount = parseFloat(amount);
+        const parsedAmount = parseAmount(amount);
         if (!amount || isNaN(parsedAmount) || parsedAmount <= 0) { toast.error('Please enter a valid budget amount'); return; }
         if (!selectedCategoryId) { toast.error('Please select a category'); return; }
 
@@ -93,18 +98,40 @@ export function AddBudgetModal({ visible, onClose, onSuccess, editBudget }: AddB
         }
     };
 
+    const handleDelete = async () => {
+        if (!editBudget) return;
+        if (!confirmDelete) { setConfirmDelete(true); return; }
+        setIsSubmitting(true);
+        try {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+            await deleteBudget(editBudget.id);
+            toast.success('Budget deleted');
+            handleClose();
+            onSuccess();
+        } catch (e) {
+            logger.error('Failed to delete budget', e);
+            toast.error('Failed to delete budget');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     return (
         <BottomSheet
             ref={sheetRef}
             visible={visible}
             onClose={onClose}
             maxHeight="90%"
-            paddingHorizontal={32}
-            paddingTop={48}
+            paddingHorizontal={24}
+            paddingTop={16}
             paddingBottom={insets.bottom + 40}
             keyboardAvoiding
         >
-            <SheetHeader title={isEditing ? 'Edit Budget' : 'Add Budget'} onClose={handleClose} />
+            <SheetHeader
+                kicker={isEditing ? (editBudget?.categoryName ?? 'All categories') : 'Spending limit'}
+                title={isEditing ? 'Edit budget' : 'New budget'}
+                onClose={handleClose}
+            />
 
             <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -119,34 +146,46 @@ export function AddBudgetModal({ visible, onClose, onSuccess, editBudget }: AddB
                 />
 
                 <View className="mb-8">
-                    <ThemedText className="text-[10px] font-bold uppercase mb-4" style={{ color: colors.textMuted }}>Category</ThemedText>
+                    <ThemedText type="kicker" className="mb-3">Category</ThemedText>
                     <CategoryChips categories={categories} selectedCategoryId={selectedCategoryId} onSelect={setSelectedCategoryId} />
                 </View>
 
                 <View className="mb-10">
-                    <ThemedText className="text-[10px] font-bold uppercase mb-3" style={{ color: colors.textMuted }}>Resets Every</ThemedText>
-                    <View className="flex-row gap-2">
-                        {PERIODS.map(p => (
-                            <Pressable
-                                key={p}
-                                onPress={() => setPeriod(p)}
-                                className="flex-1 py-3 rounded-xl items-center"
-                                style={{ backgroundColor: period === p ? colors.primary : colors.backgroundAlt }}
-                            >
-                                <ThemedText className="text-xs font-bold" style={{ color: period === p ? '#fff' : colors.textSecondary }}>
-                                    {p.charAt(0).toUpperCase() + p.slice(1)}
-                                </ThemedText>
-                            </Pressable>
-                        ))}
-                    </View>
+                    <ThemedText type="kicker" className="mb-1">Resets every</ThemedText>
+                    <SegmentedControl options={PERIOD_SEGMENTS} value={period} onChange={setPeriod} />
                 </View>
 
                 <AppButton
-                    label={isEditing ? 'Update Budget' : 'Save Budget'}
+                    label={isEditing ? 'Save changes' : 'Create budget'}
                     onPress={handleSubmit}
                     loading={isSubmitting}
                     disabled={isSubmitting}
                 />
+
+                {isEditing && (
+                    <View className="mt-4 flex-row items-center justify-center gap-3">
+                        {confirmDelete && (
+                            <Pressable
+                                onPress={() => setConfirmDelete(false)}
+                                className="min-h-[44px] px-4 justify-center"
+                                accessibilityRole="button"
+                            >
+                                <ThemedText type="label" style={{ color: colors.textSecondary }}>Keep it</ThemedText>
+                            </Pressable>
+                        )}
+                        <Pressable
+                            onPress={handleDelete}
+                            disabled={isSubmitting}
+                            className="min-h-[44px] px-4 justify-center"
+                            accessibilityRole="button"
+                            accessibilityHint={confirmDelete ? 'Deletes this budget permanently' : 'Asks for confirmation'}
+                        >
+                            <ThemedText type="label" style={{ color: colors.expense }}>
+                                {confirmDelete ? 'Confirm delete' : 'Delete budget'}
+                            </ThemedText>
+                        </Pressable>
+                    </View>
+                )}
             </ScrollView>
         </BottomSheet>
     );

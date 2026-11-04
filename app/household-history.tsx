@@ -9,9 +9,8 @@ import {
 } from '@/lib/db/queries';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
-import { UserService } from '@/services/user-service';
+import { UserService } from '@/features/user/services/user-service';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import Animated, { Easing, FadeInDown } from 'react-native-reanimated';
@@ -34,7 +33,7 @@ const FILTERS: { key: HistoryFilter; label: string }[] = [
 ];
 
 function formatRange(startISO: string, endISO: string): string {
-    const [sy, sm, sd] = startISO.split('-').map(Number);
+    const [, sm, sd] = startISO.split('-').map(Number);
     const [ey, em, ed] = endISO.split('-').map(Number);
     return `${MONTH_NAMES[sm - 1]} ${sd} – ${MONTH_NAMES[em - 1]} ${ed}, ${ey}`;
 }
@@ -57,14 +56,14 @@ function HistoryRow({
 
     return (
         <View
-            className="rounded-2xl p-4 mb-3"
+            className="rounded-xl p-4 mb-3"
             style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.divider }}
         >
             <View className="flex-row items-center justify-between mb-2">
                 <View className="flex-row items-center gap-2 flex-1">
                     <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
                     <ThemedText
-                        className="text-xs font-bold uppercase text-textMuted dark:text-dark-textMuted"
+                        type="kicker"
                         numberOfLines={1}
                     >
                         {PERIOD_LABELS[entry.period] ?? entry.period} · {formatRange(entry.start_date, entry.end_date)}
@@ -81,7 +80,7 @@ function HistoryRow({
 
             <View className="flex-row items-center justify-between mt-1">
                 <View className="flex-1">
-                    <ThemedText className="text-[10px] font-bold uppercase mb-0.5 text-textMuted dark:text-dark-textMuted">
+                    <ThemedText type="kicker" className="mb-0.5">
                         Income
                     </ThemedText>
                     <ThemedText className="text-base font-semibold text-textPrimary dark:text-dark-textPrimary" numberOfLines={1} adjustsFontSizeToFit>
@@ -92,7 +91,7 @@ function HistoryRow({
                 <View className="w-px h-8 bg-divider dark:bg-dark-divider mx-3" />
 
                 <View className="flex-1 items-center">
-                    <ThemedText className="text-[10px] font-bold uppercase mb-0.5 text-textMuted dark:text-dark-textMuted">
+                    <ThemedText type="kicker" className="mb-0.5">
                         Spent
                     </ThemedText>
                     <ThemedText
@@ -108,7 +107,7 @@ function HistoryRow({
                 <View className="w-px h-8 bg-divider dark:bg-dark-divider mx-3" />
 
                 <View className="flex-1 items-end">
-                    <ThemedText className="text-[10px] font-bold uppercase mb-0.5 text-textMuted dark:text-dark-textMuted">
+                    <ThemedText type="kicker" className="mb-0.5">
                         {isOver ? 'Over' : 'Left'}
                     </ThemedText>
                     <ThemedText
@@ -130,7 +129,7 @@ function HistoryRow({
                             className="h-full rounded-full"
                         />
                     </View>
-                    <ThemedText className="text-[10px] font-semibold text-textMuted dark:text-dark-textMuted text-right mt-1">
+                    <ThemedText className="text-[11px] font-semibold text-textMuted dark:text-dark-textMuted text-right mt-1">
                         {Math.round(pctUsed)}% used · {entry.expense_count} {entry.expense_count === 1 ? 'expense' : 'expenses'}
                     </ThemedText>
                 </View>
@@ -182,10 +181,6 @@ export default function HouseholdHistoryScreen() {
 
     return (
         <View className="flex-1 bg-background dark:bg-dark-background">
-            <LinearGradient
-                colors={[`${colors.primary}1A`, `${colors.primary}0D`, 'transparent']}
-                className="absolute top-0 left-0 right-0 h-[25%]"
-            />
 
             <ScrollView
                 className="flex-1"
@@ -195,7 +190,7 @@ export default function HouseholdHistoryScreen() {
             >
                 <ScreenHeader title="Household History" subtitle="Past budget periods" />
 
-                <View className="px-6">
+                <View className="px-5">
                     {loading ? (
                         <View className="py-24 items-center">
                             <ActivityIndicator size="large" color={colors.primary} />
@@ -236,7 +231,7 @@ export default function HouseholdHistoryScreen() {
                             </View>
 
                             <View className="flex-row items-center justify-between mb-3">
-                                <ThemedText className="text-[10px] font-bold uppercase text-textMuted dark:text-dark-textMuted">
+                                <ThemedText type="kicker">
                                     Archived Periods
                                 </ThemedText>
                                 <ThemedText className="text-xs font-medium text-textMuted dark:text-dark-textMuted">

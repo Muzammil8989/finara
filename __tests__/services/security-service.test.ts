@@ -1,6 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { SecurityService } from '@/services/security-service';
+import { encodePin, LOCKOUT_STEPS_MS, pinMatches, SecurityService } from '@/features/auth/services/security-service';
+import { installInMemorySecureStore } from '@/tests/helpers/secure-store';
 
 // Polyfill Web Crypto API for Node.js test environment
 const nodeCrypto = require('crypto');
@@ -80,90 +81,96 @@ describe('SecurityService.getBiometricStatus', () => {
     });
 });
 
-describe('SecurityService.isLockedOut', () => {
-    it('returns not locked when no lockout key', async () => {
-        mockGetItem.mockResolvedValue(null);
-        const result = await SecurityService.isLockedOut();
-        expect(result.locked).toBe(false);
-        expect(result.remainingMs).toBe(0);
-    });
+describe('PIN storage and verification', () => {
+    let store: Map<string, string>;
+    beforeEach(() => { store = installInMemorySecureStore(); });
 
-    it('returns locked when lockout time is in the future', async () => {
-        const futureTime = Date.now() + 5 * 60 * 1000;
-        mockGetItem.mockResolvedValue(futureTime.toString());
-
-        const result = await SecurityService.isLockedOut();
-        expect(result.locked).toBe(true);
-        expect(result.remainingMs).toBeGreaterThan(0);
-    });
-
-    it('clears expired lockout and returns unlocked', async () => {
-        const pastTime = Date.now() - 1000;
-        mockGetItem.mockResolvedValue(pastTime.toString());
-
-        const result = await SecurityService.isLockedOut();
-        expect(result.locked).toBe(false);
-        expect(mockDeleteItem).toHaveBeenCalledTimes(2);
-    });
-});
-
-describe('SecurityService.setPin', () => {
-    it('throws for non-4-digit PIN', async () => {
+    it('rejects anything but exactly 4 digits', async () => {
         await expect(SecurityService.setPin('123')).rejects.toThrow('PIN must be exactly 4 digits');
         await expect(SecurityService.setPin('12345')).rejects.toThrow('PIN must be exactly 4 digits');
         await expect(SecurityService.setPin('abcd')).rejects.toThrow('PIN must be exactly 4 digits');
     });
 
-    it('hashes and stores a valid PIN', async () => {
+    it('stores a salted, stretched hash — never the PIN — unique per install', async () => {
         await SecurityService.setPin('1234');
-        expect(mockSetItem).toHaveBeenCalledWith('user_security_pin', expect.any(String));
-        const storedHash = mockSetItem.mock.calls[0][1];
-        expect(storedHash).toMatch(/^[a-f0-9]{64}$/);
+        const first = store.get('user_security_pin')!;
+        expect(first).toMatch(/^v2\$[0-9a-f]+\$10000\$[0-9a-f]{64}$/);
+        expect(first).not.toContain('1234');
+        await SecurityService.setPin('1234');
+        expect(store.get('user_security_pin')).not.toBe(first); // fresh salt each time
     });
 
-    it('clears attempts and lockout on new PIN', async () => {
-        await SecurityService.setPin('5678');
-        expect(mockDeleteItem).toHaveBeenCalledWith('pin_attempts');
-        expect(mockDeleteItem).toHaveBeenCalledWith('pin_lockout_until');
+    it('accepts the right PIN and rejects a wrong one', async () => {
+        await SecurityService.setPin('1234');
+        expect(await SecurityService.verifyPin('9999')).toBe(false);
+        expect(await SecurityService.verifyPin('1234')).toBe(true);
+    });
+
+    it('accepts a PIN saved with the old scheme and upgrades it', async () => {
+        const sha256 = require('js-sha256').sha256 as (s: string) => string;
+        store.set('user_security_pin', sha256('4321finara_salt_v1'));
+        expect(await SecurityService.verifyPin('4321')).toBe(true);
+        expect(store.get('user_security_pin')).toMatch(/^v2\$/);
+        expect(await SecurityService.verifyPin('4321')).toBe(true);
+    });
+
+    it('pinMatches handles empty and unknown values', () => {
+        expect(pinMatches('1234', null)).toEqual({ ok: false, legacy: false });
+        expect(pinMatches('1234', encodePin('1234', 'abc', 3)).ok).toBe(true);
+        expect(pinMatches('1235', encodePin('1234', 'abc', 3)).ok).toBe(false);
     });
 });
 
-describe('SecurityService.verifyPin', () => {
-    it('returns true for matching PIN', async () => {
-        // Set the PIN first to capture its hash
+describe('PIN lockout', () => {
+    let store: Map<string, string>;
+    let now = 1_000_000_000_000;
+    beforeEach(async () => {
+        store = installInMemorySecureStore();
+        jest.spyOn(Date, 'now').mockImplementation(() => now);
         await SecurityService.setPin('1234');
-        const storedHash = mockSetItem.mock.calls[0][1];
+    });
+    afterEach(() => jest.restoreAllMocks());
 
-        // Mock getItemAsync: no lockout, then return the stored hash
-        mockGetItem
-            .mockResolvedValueOnce(null)      // isLockedOut check
-            .mockResolvedValueOnce(storedHash); // PIN retrieval
+    const failFive = async () => { for (let i = 0; i < 5; i++) await SecurityService.verifyPin('0000'); };
 
-        const result = await SecurityService.verifyPin('1234');
-        expect(result).toBe(true);
+    it('locks after 5 wrong tries, and even the right PIN is refused while locked', async () => {
+        await failFive();
+        expect((await SecurityService.isLockedOut()).locked).toBe(true);
+        expect(await SecurityService.verifyPin('1234')).toBe(false);
     });
 
-    it('returns false for wrong PIN', async () => {
-        await SecurityService.setPin('1234');
-        const storedHash = mockSetItem.mock.calls[0][1];
-
-        mockGetItem
-            .mockResolvedValueOnce(null)       // isLockedOut
-            .mockResolvedValueOnce(storedHash) // PIN
-            .mockResolvedValueOnce(null);      // attempts
-
-        const result = await SecurityService.verifyPin('9999');
-        expect(result).toBe(false);
+    it('each lockout in a row lasts longer', async () => {
+        await failFive();
+        expect((await SecurityService.isLockedOut()).remainingMs).toBe(LOCKOUT_STEPS_MS[0]);
+        now += LOCKOUT_STEPS_MS[0] + 1;
+        expect((await SecurityService.isLockedOut()).locked).toBe(false);
+        await failFive();
+        expect((await SecurityService.isLockedOut()).remainingMs).toBe(LOCKOUT_STEPS_MS[1]);
     });
 
-    it('returns false immediately when locked out', async () => {
-        const futureTime = Date.now() + 5 * 60 * 1000;
-        mockGetItem.mockResolvedValue(futureTime.toString());
+    it('moving the clock back does not shorten a lockout', async () => {
+        await failFive();
+        now -= 24 * 60 * 60 * 1000;
+        const state = await SecurityService.isLockedOut();
+        expect(state.locked).toBe(true);
+        expect(state.remainingMs).toBe(LOCKOUT_STEPS_MS[0]);
+    });
 
-        const result = await SecurityService.verifyPin('1234');
-        expect(result).toBe(false);
+    it('a correct PIN after a lockout resets the escalation', async () => {
+        await failFive();
+        now += LOCKOUT_STEPS_MS[0] + 1;
+        expect(await SecurityService.verifyPin('1234')).toBe(true);
+        await failFive();
+        expect((await SecurityService.isLockedOut()).remainingMs).toBe(LOCKOUT_STEPS_MS[0]);
+    });
+
+    it('clearSecurity removes every PIN and lockout key', async () => {
+        await failFive();
+        await SecurityService.clearSecurity();
+        expect([...store.keys()]).toEqual([]);
     });
 });
+
 
 describe('SecurityService.isSecurityConfigured', () => {
     it('returns true when PIN is set', async () => {

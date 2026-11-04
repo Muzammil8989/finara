@@ -1,18 +1,18 @@
-import { EmptyState, ScreenHeader, ThemedText } from '@/components/common';
-import { IncomeCard } from '@/app/_household/income-card';
-import { SummaryBar } from '@/app/_household/summary-bar';
-import { ExpenseItem } from '@/app/_household/expense-item';
-import { IncomeSetupModal } from '@/app/_household/income-setup-modal';
-import { AddExpenseModal } from '@/app/_household/add-expense-modal';
-import { TransferModal } from '@/app/_household/transfer-modal';
-import { useHousehold } from '@/hooks/use-household';
+import { EmptyState, Fab, ScreenHeader, ThemedText } from '@/components/common';
+import { IncomeCard } from '@/features/household/components/income-card';
+import { SummaryBar } from '@/features/household/components/summary-bar';
+import { ExpenseItem } from '@/features/household/components/expense-item';
+import { IncomeSetupModal } from '@/features/household/components/income-setup-modal';
+import { AddExpenseModal } from '@/features/household/components/add-expense-modal';
+import { TransferModal } from '@/features/household/components/transfer-modal';
+import { useHousehold } from '@/features/household/hooks/use-household';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useUser } from '@/features/user/context/user-context';
-import { deleteHouseholdExpense, deleteLinkedTransferTransaction, HouseholdExpenseWithCategory } from '@/lib/db/queries';
+import { UserService } from '@/features/user/services/user-service';
+import { deleteHouseholdExpenseWithLink, HouseholdExpenseWithCategory } from '@/lib/db/queries';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -47,44 +47,36 @@ function DeleteConfirmSheet({
                     exiting={FadeOutDown.duration(200).easing(Easing.in(Easing.cubic))}
                     style={{
                         backgroundColor: colors.surface,
-                        borderTopLeftRadius: 40,
-                        borderTopRightRadius: 40,
-                        paddingHorizontal: 28,
-                        paddingTop: 36,
+                        borderTopLeftRadius: 24,
+                        borderTopRightRadius: 24,
+                        paddingHorizontal: 24,
+                        paddingTop: 16,
                         paddingBottom: insets.bottom + 32,
                         overflow: 'hidden',
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: -4 },
-                        shadowOpacity: 0.15,
-                        shadowRadius: 20,
-                        elevation: 20,
+                        borderTopWidth: 1,
+                        borderColor: colors.divider,
                     }}
                 >
-                    <LinearGradient
-                        colors={['rgba(239,68,68,0.10)', 'transparent']}
-                        className="absolute top-0 left-0 right-0 h-[60%]"
-                    />
-                    <View className="w-12 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full mx-auto mb-6" />
+                    <View className="w-9 h-1 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-5" />
 
                     <View
-                        className="w-16 h-16 rounded-2xl items-center justify-center mx-auto mb-4"
-                        style={{ backgroundColor: `${colors.error}15` }}
+                        className="w-16 h-16 rounded-full items-center justify-center mx-auto mb-5 border border-divider dark:border-dark-divider"
                     >
-                        <Ionicons name="trash-outline" size={28} color={colors.error} />
+                        <Ionicons name="trash-outline" size={28} color={colors.expense} />
                     </View>
 
-                    <ThemedText className="text-xl font-semibold text-center text-textPrimary dark:text-dark-textPrimary mb-2">
+                    <ThemedText type="headline" className="text-center mb-2" accessibilityRole="header">
                         Delete Expense?
                     </ThemedText>
                     <ThemedText className="text-sm text-center mb-8 text-textMuted dark:text-dark-textMuted">
-                        "{expense.categoryName ?? 'Expense'}" will be permanently removed.
+                        “{expense.categoryName ?? 'Expense'}” will be permanently removed.
                     </ThemedText>
 
                     <View className="gap-3">
                         <Pressable
                             onPress={onConfirm}
                             disabled={isDeleting}
-                            className="w-full py-4 rounded-2xl items-center"
+                            className="w-full py-4 rounded-xl items-center"
                             style={{ backgroundColor: colors.error }}
                         >
                             {isDeleting
@@ -94,7 +86,7 @@ function DeleteConfirmSheet({
                         </Pressable>
                         <Pressable
                             onPress={onCancel}
-                            className="w-full py-4 rounded-2xl items-center bg-backgroundAlt dark:bg-dark-backgroundAlt"
+                            className="w-full py-4 rounded-xl items-center bg-backgroundAlt dark:bg-dark-backgroundAlt"
                         >
                             <ThemedText className="font-semibold text-base text-textPrimary dark:text-dark-textPrimary">
                                 Cancel
@@ -140,10 +132,7 @@ export default function HouseholdScreen() {
         if (!deletingExpense) return;
         setIsDeleting(true);
         try {
-            if (deletingExpense.notes?.startsWith('transfer-out:')) {
-                await deleteLinkedTransferTransaction(deletingExpense.date, deletingExpense.amount);
-            }
-            await deleteHouseholdExpense(deletingExpense.id);
+            await deleteHouseholdExpenseWithLink(deletingExpense);
             toast.success('Expense deleted');
             setDeletingExpense(null);
             refresh();
@@ -157,10 +146,6 @@ export default function HouseholdScreen() {
 
     return (
         <View className="flex-1 bg-background dark:bg-dark-background">
-            <LinearGradient
-                colors={[`${colors.primary}1A`, `${colors.primary}0D`, 'transparent']}
-                className="absolute top-0 left-0 right-0 h-[30%]"
-            />
 
             <ScrollView
                 className="flex-1"
@@ -175,8 +160,8 @@ export default function HouseholdScreen() {
                         <View className="flex-row items-center gap-2">
                             <Pressable
                                 onPress={() => router.push('/household-history')}
-                                className="w-11 h-11 rounded-2xl items-center justify-center"
-                                style={{ backgroundColor: `${colors.primary}15` }}
+                                className="w-11 h-11 rounded-xl items-center justify-center"
+                                style={{ borderWidth: 1, borderColor: colors.borderStrong }}
                                 hitSlop={6}
                             >
                                 <Ionicons name="time-outline" size={20} color={colors.primary} />
@@ -184,7 +169,7 @@ export default function HouseholdScreen() {
                             {!config && (
                                 <Pressable
                                     onPress={() => setIncomeModalVisible(true)}
-                                    className="w-11 h-11 rounded-2xl bg-primary items-center justify-center"
+                                    className="w-11 h-11 rounded-xl bg-primary items-center justify-center"
                                 >
                                     <Ionicons name="add" size={24} color="#fff" />
                                 </Pressable>
@@ -193,7 +178,7 @@ export default function HouseholdScreen() {
                     }
                 />
 
-                <View className="px-6">
+                <View className="px-5">
                     {loading ? (
                         <View className="py-24 items-center">
                             <ActivityIndicator size="large" color={colors.primary} />
@@ -226,7 +211,7 @@ export default function HouseholdScreen() {
                             {summary.remaining > 0 && (
                                 <Pressable
                                     onPress={() => setTransferVisible(true)}
-                                    className="flex-row items-center justify-center gap-2 py-3.5 rounded-2xl mb-4"
+                                    className="flex-row items-center justify-center gap-2 py-3.5 rounded-xl mb-4"
                                     style={{
                                         backgroundColor: `${colors.success}15`,
                                         borderWidth: 1,
@@ -243,19 +228,19 @@ export default function HouseholdScreen() {
                             {/* Over budget banner */}
                             {summary.remaining < 0 && (
                                 <View
-                                    className="flex-row items-center gap-2 py-3 px-4 rounded-2xl mb-4"
+                                    className="flex-row items-center gap-2 py-3 px-4 rounded-xl mb-4"
                                     style={{ backgroundColor: `${colors.error}12` }}
                                 >
-                                    <Ionicons name="warning-outline" size={16} color={colors.error} />
-                                    <ThemedText className="text-xs font-semibold flex-1" style={{ color: colors.error }}>
-                                        Over budget by {Math.abs(summary.remaining).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                    <Ionicons name="warning-outline" size={16} color={colors.expense} />
+                                    <ThemedText className="text-xs font-semibold flex-1" style={{ color: colors.expense }}>
+                                        Over budget by {UserService.formatCurrency(Math.abs(summary.remaining), currencyCode)}
                                     </ThemedText>
                                 </View>
                             )}
 
                             {/* Section label */}
                             <View className="flex-row items-center justify-between mb-3">
-                                <ThemedText className="text-[10px] font-bold uppercase text-textMuted dark:text-dark-textMuted">
+                                <ThemedText type="kicker">
                                     Expenses This Period
                                 </ThemedText>
                                 <ThemedText className="text-xs font-medium text-textMuted dark:text-dark-textMuted">
@@ -288,29 +273,11 @@ export default function HouseholdScreen() {
 
             {/* FAB — shown once budget is set up */}
             {config && (
-                <Pressable
+                <Fab
                     onPress={openAddExpense}
-                    style={{
-                        position: 'absolute',
-                        bottom: insets.bottom + 24,
-                        right: 24,
-                        width: 56,
-                        height: 56,
-                        borderRadius: 18,
-                        backgroundColor: summary.remaining <= 0 ? colors.textMuted : colors.error,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        shadowColor: summary.remaining <= 0 ? colors.textMuted : colors.error,
-                        shadowOffset: { width: 0, height: 6 },
-                        shadowOpacity: summary.remaining <= 0 ? 0.15 : 0.35,
-                        shadowRadius: 10,
-                        elevation: 8,
-                        zIndex: 100,
-                        opacity: summary.remaining <= 0 ? 0.55 : 1,
-                    }}
-                >
-                    <Ionicons name="add" size={28} color="#fff" />
-                </Pressable>
+                    accessibilityLabel="Add household expense"
+                    style={{ position: 'absolute', bottom: insets.bottom + 24, right: 20 }}
+                />
             )}
 
             {/* Modals */}
@@ -328,6 +295,7 @@ export default function HouseholdScreen() {
                 onSuccess={() => { setAddExpenseVisible(false); setEditingExpense(null); refresh(); }}
                 editingExpense={editingExpense}
                 currencyCode={currencyCode}
+                periodStart={periodRange.start}
             />
 
             <TransferModal

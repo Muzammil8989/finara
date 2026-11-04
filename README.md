@@ -25,15 +25,29 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
-## Get a fresh project
+## Project structure
 
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+app/                  Expo Router routes only (screens compose feature components)
+features/<domain>/    Everything owned by one domain:
+  components/           UI used by that domain's screens
+  hooks/                data hooks (use-budgets, use-loans, ...)
+  services/ context/    domain services and providers
+  utils.ts              pure helpers for the domain
+components/
+  common/             shared UI kit, imported via `@/components/common`
+  layouts/            app shell: tab bar, FAB, lock screen, error boundary
+hooks/                cross-cutting hooks (color scheme, theme colors)
+providers/            app-wide providers (modal state)
+lib/                  db (Drizzle/SQLite), utils, logger, toast
+theme/                design tokens (colors, typography, spacing, shadows)
+types/                shared TypeScript types
+__tests__/ tests/     Jest suites and test helpers
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Domains: accounts, auth, backup, budgets, categories, household, loans, notifications, onboarding, overview, recurring, reports, savings, settings, transactions, user.
+
+Import feature code by deep path (e.g. `@/features/loans/hooks/use-loans`); feature folders have no barrel files.
 
 ## Learn more
 

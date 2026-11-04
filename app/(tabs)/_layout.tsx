@@ -1,13 +1,14 @@
 import { AddBudgetModal } from '@/features/budgets/components/add-budget-modal';
+import { ExportSheet } from '@/features/export/components/export-sheet';
 import { AddTransactionModal } from '@/features/transactions/components/add-transaction-modal';
 import { CustomTabBar, GlobalFab } from '@/components/layouts';
-import { useModals } from '@/context/modal-context';
+import { useModals } from '@/providers/modal-context';
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { View } from 'react-native';
 
 export default function TabLayout() {
-  const { activeModal, transactionInitialType, closeModal, triggerRefresh } = useModals();
+  const { activeModal, transactionInitialType, editingBudget, closeModal, triggerRefresh } = useModals();
 
   return (
     <View style={{ flex: 1 }}>
@@ -34,14 +35,17 @@ export default function TabLayout() {
         }}
         initialType={transactionInitialType}
       />
+      {/* One budget sheet for add and edit — Budgets passes the edit target through openModal. */}
       <AddBudgetModal
         visible={activeModal === 'budget'}
+        editBudget={editingBudget}
         onClose={closeModal}
         onSuccess={() => {
           triggerRefresh();
           closeModal();
         }}
       />
+      <ExportSheet visible={activeModal === 'export'} onClose={closeModal} />
     </View>
   );
 }

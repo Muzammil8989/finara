@@ -1,5 +1,5 @@
 import { renderHook, act, waitFor } from '@testing-library/react-native';
-import { useAccounts } from '@/hooks/use-accounts';
+import { useAccounts } from '@/features/accounts/hooks/use-accounts';
 
 // Override global db-client mock to include isDbReady
 jest.mock('@/lib/db/db-client', () => ({
@@ -12,7 +12,7 @@ jest.mock('@/lib/db/queries', () => ({
     getAccountsWithBalance: jest.fn(),
 }));
 
-jest.mock('@/context/modal-context', () => ({
+jest.mock('@/providers/modal-context', () => ({
     useModals: jest.fn(() => ({
         refreshSignal: 0,
         openModal: jest.fn(),
@@ -22,7 +22,7 @@ jest.mock('@/context/modal-context', () => ({
 
 import { ensureDefaultAccount, getAccountsWithBalance } from '@/lib/db/queries';
 import { isDbReady } from '@/lib/db/db-client';
-import { useModals } from '@/context/modal-context';
+import { useModals } from '@/providers/modal-context';
 
 const mockEnsureDefault = ensureDefaultAccount as jest.Mock;
 const mockGetAccounts = getAccountsWithBalance as jest.Mock;
@@ -55,9 +55,9 @@ describe('useAccounts', () => {
 
         expect(result.current.accounts).toEqual(MOCK_ACCOUNTS);
         expect(result.current.error).toBeNull();
-        // Hook has two useEffects that both call refresh() on mount
-        expect(mockEnsureDefault).toHaveBeenCalledTimes(2);
-        expect(mockGetAccounts).toHaveBeenCalledTimes(2);
+        // One fetch on mount (the legacy hook fetched twice).
+        expect(mockEnsureDefault).toHaveBeenCalledTimes(1);
+        expect(mockGetAccounts).toHaveBeenCalledTimes(1);
     });
 
     it('does nothing when db is not ready', async () => {

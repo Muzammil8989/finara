@@ -45,3 +45,6 @@ app-example
 # Claude Code / AI assistant files (not part of the app)
 .claude/
 CLAUDE.md
+
+# Test coverage output
+coverage/

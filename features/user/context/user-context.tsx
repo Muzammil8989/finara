@@ -1,5 +1,7 @@
 import { useColorScheme } from 'nativewind';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { isDbReady } from '@/lib/db/db-client';
+import { setAccountsCurrency } from '@/lib/db/queries';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { logger } from '@/lib/logger';
 import { UserProfile, UserService } from '../services/user-service';
 
@@ -25,13 +27,19 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     const { setColorScheme } = useColorScheme();
     const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
     const [isLoading, setIsLoading] = useState(true);
+    // Latest profile, so rapid successive updates (e.g. typing a name) each
+    // build on the previous one instead of a stale render-time copy.
+    const profileRef = useRef<UserProfile>(DEFAULT_PROFILE);
 
     useEffect(() => {
         let mounted = true;
         const loadProfile = async () => {
             try {
                 const data = await UserService.getProfile();
-                if (mounted) setProfile(data);
+                if (mounted) {
+                    profileRef.current = data;
+                    setProfile(data);
+                }
             } catch (error) {
                 logger.error('Failed to load user profile, using defaults', error);
             } finally {
@@ -50,16 +58,27 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }, [profile.theme, setColorScheme]);
 
     const updateProfile = useCallback(async (updates: Partial<UserProfile>) => {
-        const newProfile = { ...profile, ...updates };
+        const previous = profileRef.current;
+        const newProfile = { ...previous, ...updates };
+        profileRef.current = newProfile;
         setProfile(newProfile);
         try {
             await UserService.saveProfile(newProfile);
+            // Accounts are always in the profile currency; keep them in step so
+            // balances in different currency codes are never added together.
+            if (updates.currency && updates.currency !== previous.currency && isDbReady()) {
+                await setAccountsCurrency(updates.currency);
+            }
         } catch (error) {
             logger.error('Failed to save user profile', error);
-            setProfile(profile);
+            // Roll back only if nothing newer has been applied since.
+            if (profileRef.current === newProfile) {
+                profileRef.current = previous;
+                setProfile(previous);
+            }
             throw error;
         }
-    }, [profile]);
+    }, []);
 
     return (
         <UserContext.Provider value={{ profile, updateProfile, isLoading }}>

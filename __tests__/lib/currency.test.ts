@@ -9,6 +9,7 @@ import {
     calculatePercentage,
     roundToTwo,
     formatNumber,
+    parseAmount,
 } from '@/lib/utils/currency';
 
 describe('numberToWords', () => {
@@ -129,6 +130,27 @@ describe('formatCurrencyCompact', () => {
         expect(result).toContain('M');
         expect(result).not.toContain('.00');
     });
+
+    it('keeps the digit after a zero decimal (1,050 is not 15K)', () => {
+        expect(formatCurrencyCompact(1050)).toBe('$1.1K');
+        expect(formatCurrencyCompact(2500)).toBe('$2.5K');
+    });
+
+    it('rounds up into the next unit instead of 1000K', () => {
+        expect(formatCurrencyCompact(999_999)).toBe('$1M');
+    });
+
+    it('compacts negative amounts too', () => {
+        expect(formatCurrencyCompact(-1500)).toBe('-$1.5K');
+    });
+});
+
+describe('invalid currency codes', () => {
+    it('formatCurrency and getCurrencySymbol fall back instead of throwing', () => {
+        expect(formatCurrency(12.5, 'XX')).toBe('12.50 XX');
+        expect(formatCurrency(-3, 'XX')).toBe('-3.00 XX');
+        expect(getCurrencySymbol('XX')).toBe('XX');
+    });
 });
 
 describe('parseCurrency', () => {
@@ -229,5 +251,47 @@ describe('formatNumber', () => {
 
     it('formats small numbers without separator', () => {
         expect(formatNumber(999)).toBe('999');
+    });
+});
+
+describe('parseAmount', () => {
+    it('parses plain decimals', () => {
+        expect(parseAmount('12.5')).toBe(12.5);
+        expect(parseAmount('0.99')).toBe(0.99);
+        expect(parseAmount('100')).toBe(100);
+    });
+
+    it('accepts a decimal comma (European decimal-pad keyboards)', () => {
+        expect(parseAmount('12,5')).toBe(12.5);
+        expect(parseAmount(',75')).toBe(0.75);
+    });
+
+    it('treats commas as thousands separators when a dot is present', () => {
+        expect(parseAmount('1,234.50')).toBe(1234.5);
+    });
+
+    it('reads grouped thousands with no decimal part', () => {
+        expect(parseAmount('1,234')).toBe(1234);
+        expect(parseAmount('1,234,567')).toBe(1234567);
+        expect(parseAmount('1.234.567')).toBe(1234567);
+    });
+
+    it('reads European grouping with a decimal comma', () => {
+        expect(parseAmount('1.234,56')).toBe(1234.56);
+    });
+
+    it('rounds to whole cents', () => {
+        expect(parseAmount('10.999')).toBe(11);
+        expect(parseAmount('2.345')).toBe(2.35);
+    });
+
+    it('allows a leading minus for opening balances', () => {
+        expect(parseAmount('-250')).toBe(-250);
+    });
+
+    it('rejects anything that is not a number', () => {
+        for (const bad of ['', ' ', '.', '-', 'abc', '1,2,3', '12a', '1.2.3', null, undefined]) {
+            expect(parseAmount(bad as string)).toBeNaN();
+        }
     });
 });

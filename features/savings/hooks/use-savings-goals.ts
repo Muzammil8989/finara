@@ -1,7 +1,7 @@
 import { isDbReady } from '@/lib/db/db-client';
 import { getSavingsGoals } from '@/lib/db/queries';
 import { SavingsGoal } from '@/lib/db/schema';
-import { useModals } from '@/context/modal-context';
+import { useModals } from '@/providers/modal-context';
 import { logger } from '@/lib/logger';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { InteractionManager } from 'react-native';

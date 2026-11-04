@@ -43,14 +43,14 @@ export function EmptyState({
   const colors = useThemeColors();
 
   const resolvedIconColor = iconColor ?? colors.textMuted;
-  const resolvedIconBg = iconBg ?? (iconColor ? `${iconColor}18` : colors.surfaceAlt);
+  const resolvedIconBg = iconBg ?? 'transparent';
   const resolvedActionColor = actionColor ?? colors.primary;
 
   const iconSize = compact ? 28 : 38;
-  const containerSize = compact ? 'w-16 h-16' : 'w-20 h-20';
+  const containerSize = compact ? 'w-14 h-14' : 'w-[72px] h-[72px]';
   const titleClass = compact
-    ? 'text-base font-bold text-center text-textPrimary dark:text-dark-textPrimary mb-1'
-    : 'text-xl font-bold text-center text-textPrimary dark:text-dark-textPrimary mb-2';
+    ? 'text-lg text-center text-textPrimary dark:text-dark-textPrimary mb-1'
+    : 'text-[22px] leading-7 text-center text-textPrimary dark:text-dark-textPrimary mb-2';
   const subtitleClass = compact
     ? 'text-xs text-center text-textMuted dark:text-dark-textMuted'
     : 'text-sm text-center text-textMuted dark:text-dark-textMuted leading-relaxed';
@@ -59,13 +59,13 @@ export function EmptyState({
   const content = (
     <View className={paddingClass}>
       <View
-        className={`${containerSize} rounded-3xl items-center justify-center mb-5`}
-        style={{ backgroundColor: resolvedIconBg }}
+        className={`${containerSize} rounded-full items-center justify-center mb-5`}
+        style={{ backgroundColor: resolvedIconBg, borderWidth: 1, borderColor: colors.borderStrong }}
       >
         <Ionicons name={icon} size={iconSize} color={resolvedIconColor} />
       </View>
 
-      <ThemedText className={titleClass}>{title}</ThemedText>
+      <ThemedText type="headline" className={titleClass}>{title}</ThemedText>
 
       {!!subtitle && (
         <ThemedText className={`${subtitleClass} ${actionLabel ? 'mb-8' : ''}`}>

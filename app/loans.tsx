@@ -1,19 +1,16 @@
-import { EmptyState, ScreenHeader, ThemedText } from '@/components/common';
-import { AddLoanModal } from '@/app/_loans/add-loan-modal';
-import { RecordPaymentModal } from '@/app/_loans/record-payment-modal';
-import { LoanItem } from '@/app/_loans/loan-item';
-import { LoanSummaryCard } from '@/app/_loans/loan-summary-card';
-import { DeleteConfirmSheet } from '@/app/_loans/delete-confirm-sheet';
-import { useLoans } from '@/hooks/use-loans';
+import { EmptyState, Fab, ScreenHeader, ThemedText } from '@/components/common';
+import { AddLoanModal } from '@/features/loans/components/add-loan-modal';
+import { RecordPaymentModal } from '@/features/loans/components/record-payment-modal';
+import { LoanItem } from '@/features/loans/components/loan-item';
+import { LoanSummaryCard } from '@/features/loans/components/loan-summary-card';
+import { DeleteConfirmSheet } from '@/features/loans/components/delete-confirm-sheet';
+import { useLoans } from '@/features/loans/hooks/use-loans';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useUser } from '@/features/user/context/user-context';
-import { useModals } from '@/context/modal-context';
+import { useModals } from '@/providers/modal-context';
 import { deleteLoan, transferLoanToAccount, LoanWithDetails } from '@/lib/db/queries';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -61,7 +58,7 @@ export default function LoansScreen() {
       triggerRefresh();
     } catch (e) {
       logger.error('LoansScreen: transfer failed', e);
-      toast.error('Transfer failed');
+      toast.error(e instanceof Error && e.message === 'Loan is not fully repaid yet' ? e.message : 'Transfer failed');
     }
   };
 
@@ -90,10 +87,6 @@ export default function LoansScreen() {
 
   return (
     <View className="flex-1 bg-background dark:bg-dark-background">
-      <LinearGradient
-        colors={[`${colors.primary}1A`, `${colors.primary}0D`, 'transparent']}
-        className="absolute top-0 left-0 right-0 h-[30%]"
-      />
 
       <ScrollView
         className="flex-1"
@@ -110,14 +103,14 @@ export default function LoansScreen() {
         <LoanSummaryCard summary={summary} currencyCode={currencyCode} />
 
         {/* Filter Tabs */}
-        <View className="flex-row mx-6 mb-4 rounded-2xl overflow-hidden" style={{ backgroundColor: colors.tagDefaultBg }}>
+        <View className="flex-row mx-6 mb-4 rounded-xl overflow-hidden" style={{ backgroundColor: colors.tagDefaultBg }}>
           {filterTabs.map((tab) => {
             const isActive = filter === tab.key;
             return (
               <Pressable
                 key={tab.key}
                 onPress={() => setFilter(tab.key)}
-                className="flex-1 py-2.5 items-center rounded-2xl"
+                className="flex-1 py-2.5 items-center rounded-xl"
                 style={isActive ? { backgroundColor: tab.color } : undefined}
               >
                 <ThemedText
@@ -155,7 +148,7 @@ export default function LoansScreen() {
           <Animated.View entering={FadeInDown.duration(350).easing(Easing.out(Easing.cubic))}>
             {/* Section label */}
             <View className="flex-row items-center justify-between mx-6 mb-3">
-              <ThemedText className="text-[10px] font-bold uppercase text-textMuted dark:text-dark-textMuted">
+              <ThemedText type="kicker">
                 {filter === 'all' ? 'All Loans' : filter === 'given' ? 'Given Out' : 'Taken'}
               </ThemedText>
               <ThemedText className="text-xs font-medium text-textMuted dark:text-dark-textMuted">
@@ -179,28 +172,11 @@ export default function LoansScreen() {
       </ScrollView>
 
       {/* FAB */}
-      <Pressable
+      <Fab
         onPress={handleOpenAdd}
-        style={{
-          position: 'absolute',
-          bottom: insets.bottom + 24,
-          right: 24,
-          width: 56,
-          height: 56,
-          borderRadius: 18,
-          backgroundColor: colors.warning,
-          alignItems: 'center',
-          justifyContent: 'center',
-          shadowColor: colors.warning,
-          shadowOffset: { width: 0, height: 6 },
-          shadowOpacity: 0.35,
-          shadowRadius: 10,
-          elevation: 8,
-          zIndex: 100,
-        }}
-      >
-        <Ionicons name="add" size={28} color="#fff" />
-      </Pressable>
+        accessibilityLabel="Add loan"
+        style={{ position: 'absolute', bottom: insets.bottom + 24, right: 20 }}
+      />
 
       {/* Modals */}
       {categoryIds && (

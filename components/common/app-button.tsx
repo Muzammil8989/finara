@@ -1,4 +1,5 @@
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { fonts } from '@/theme/typography';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
@@ -22,8 +23,6 @@ export interface AppButtonProps {
   /** flex:1 so the button fills its flex container */
   flex?: boolean;
 }
-
-const RIPPLE_COLOR = 'rgba(36,107,253,0.12)';
 
 export function AppButton({
   label,
@@ -52,35 +51,26 @@ export function AppButton({
     ? colors.textPrimary
     : '#FFFFFF';
 
-  // ── Shadow — tinted for primary/destructive, neutral for secondary ────────
-  const shadow = variant === 'secondary' ? undefined : {
-    shadowColor: bgColor,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.28,
-    shadowRadius: 10,
-    elevation: 8,
-  };
-
   // ── Sizing ─────────────────────────────────────────────────────────────────
-  const paddingVertical = size === 'sm' ? 10 : 16;
+  const paddingVertical = size === 'sm' ? 10 : 14;
+  const minHeight = size === 'sm' ? 44 : 52;
   const paddingHorizontal = size === 'sm' ? 20 : 24;
   const fontSize = size === 'sm' ? 14 : 16;
 
   // ── Secondary border ──────────────────────────────────────────────────────
   const secondaryBorder = variant === 'secondary'
-    ? { borderWidth: 1, borderColor: colors.borderSoft }
+    ? { borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: 'transparent' }
     : undefined;
 
   return (
     <Pressable
       onPress={onPress}
       disabled={isDisabled}
-      android_ripple={{ color: RIPPLE_COLOR, borderless: false }}
+      android_ripple={{ color: colors.btnGhostBgPressed, borderless: false }}
       style={[
         styles.base,
-        { paddingVertical, paddingHorizontal, backgroundColor: bgColor },
+        { paddingVertical, paddingHorizontal, minHeight, backgroundColor: bgColor },
         secondaryBorder,
-        shadow,
         flex && { flex: 1 },
         isDisabled && styles.disabled,
       ]}
@@ -101,8 +91,8 @@ export function AppButton({
                 style={{
                   color: fgColor,
                   fontSize,
-                  fontFamily: 'PlusJakartaSans_700Bold',
-                  letterSpacing: 0.2,
+                  fontFamily: fonts.sansSemiBold,
+                  letterSpacing: 0.1,
                 }}
               >
                 {label}
@@ -122,7 +112,7 @@ export function AppButton({
 
 const styles = StyleSheet.create({
   base: {
-    borderRadius: 16,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -135,7 +125,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   disabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   pressedOverlay: {
     backgroundColor: 'rgba(0,0,0,0.07)',

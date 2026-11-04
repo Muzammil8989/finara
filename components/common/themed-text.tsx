@@ -1,10 +1,18 @@
-import { useThemeColor } from '@/hooks/use-theme-color';
+import { useThemeColors } from '@/hooks/use-theme-colors';
+import { fonts, tabularNums } from '@/theme/typography';
 import { Text, type TextProps } from 'react-native';
 
 export type ThemedTextProps = TextProps & {
-  lightColor?: string;
-  darkColor?: string;
-  type?: 'default' | 'title' | 'defaultSemiBold' | 'subtitle' | 'link' | 'small';
+  type?:
+    | 'default' | 'title' | 'defaultSemiBold' | 'subtitle' | 'link' | 'small'
+    // Editorial variants
+    | 'display'   // serif masthead, 34px
+    | 'headline'  // serif screen/section title, 24px
+    | 'kicker'    // small uppercase label above a headline, muted
+    | 'label'     // UI label, 13px semibold
+    | 'caption'   // 12px muted helper text
+    | 'figure'    // tabular number, 16px
+    | 'figureLg'; // tabular hero number, 34px
   className?: string;
 };
 
@@ -36,7 +44,7 @@ function hasStandardColorClass(className: string | undefined): boolean {
     if (!base.startsWith('text-')) continue;
     if (NON_COLOR_TEXT_CLASSES.has(base)) continue;
     if (THEME_TEXT_CLASSES.has(base)) continue;
-    // Arbitrary size values like text-[10px] — not a color
+    // Arbitrary size values like text-[11px] — not a color
     if (base.startsWith('text-[') && !base.match(/text-\[#[0-9A-Fa-f]/)) continue;
     // Anything else starting with text- is a color class
     return true;
@@ -44,37 +52,75 @@ function hasStandardColorClass(className: string | undefined): boolean {
   return false;
 }
 
-// Maps ThemedText type → Plus Jakarta Sans font file (weight embedded in name)
+// Maps ThemedText type → font file (weight embedded in name)
 const TYPE_FONT: Record<string, string> = {
-  title:          'PlusJakartaSans_700Bold',
-  subtitle:       'PlusJakartaSans_600SemiBold',
-  defaultSemiBold:'PlusJakartaSans_600SemiBold',
-  link:           'PlusJakartaSans_600SemiBold',
-  small:          'PlusJakartaSans_400Regular',
-  default:        'PlusJakartaSans_400Regular',
+  title:          fonts.serif,
+  subtitle:       fonts.sansSemiBold,
+  defaultSemiBold:fonts.sansSemiBold,
+  link:           fonts.sansSemiBold,
+  small:          fonts.sans,
+  default:        fonts.sans,
+  display:        fonts.serif,
+  headline:       fonts.serif,
+  kicker:         fonts.sansBold,
+  label:          fonts.sansSemiBold,
+  caption:        fonts.sans,
+  figure:         fonts.figure,
+  figureLg:       fonts.figureSemiBold,
 };
+
+const MUTED_TYPES = new Set(['kicker', 'caption']);
+const FIGURE_TYPES = new Set(['figure', 'figureLg']);
+const SERIF_TYPES = new Set(['title', 'display', 'headline']);
+
+/**
+ * Custom fonts ship one file per weight. A `font-bold` class would set
+ * fontWeight on top of e.g. PlusJakartaSans_400Regular, which Android renders
+ * as faux-bold or the system font. So weight classes pick the matching file
+ * instead and are removed from the className.
+ */
+const WEIGHT_RE = /^font-(thin|light|normal|medium|semibold|bold|extrabold|black)$/;
+const FAMILY_BY_WEIGHT: Record<'sans' | 'serif' | 'figure', Record<string, string>> = {
+  sans: { thin: fonts.sans, light: fonts.sans, normal: fonts.sans, medium: fonts.sansMedium, semibold: fonts.sansSemiBold, bold: fonts.sansBold, extrabold: fonts.sansBold, black: fonts.sansBold },
+  serif: { thin: fonts.serif, light: fonts.serif, normal: fonts.serif, medium: fonts.serif, semibold: fonts.serif, bold: fonts.serifBold, extrabold: fonts.serifBold, black: fonts.serifBold },
+  figure: { thin: fonts.figure, light: fonts.figure, normal: fonts.figure, medium: fonts.figure, semibold: fonts.figureSemiBold, bold: fonts.figureBold, extrabold: fonts.figureBold, black: fonts.figureBold },
+};
+
+function resolveWeight(classes: string, type: string): { className: string; fontFamily: string } {
+  let weight: string | null = null;
+  const kept: string[] = [];
+  for (const token of classes.split(/\s+/)) {
+    if (!token) continue;
+    const m = token.match(WEIGHT_RE);
+    if (m) weight = m[1]; else kept.push(token);
+  }
+  const base = TYPE_FONT[type] ?? fonts.sans;
+  if (!weight) return { className: kept.join(' '), fontFamily: base };
+  const family = SERIF_TYPES.has(type) ? 'serif' : FIGURE_TYPES.has(type) ? 'figure' : 'sans';
+  return { className: kept.join(' '), fontFamily: FAMILY_BY_WEIGHT[family][weight] };
+}
+
 
 export function ThemedText({
   style,
-  lightColor,
-  darkColor,
   type = 'default',
   className,
   ...rest
 }: ThemedTextProps) {
-  const defaultColor = useThemeColor({ light: lightColor, dark: darkColor }, 'text');
+  const colors = useThemeColors();
+  const defaultColor = MUTED_TYPES.has(type) ? colors.textMuted : colors.textPrimary;
   const hasExplicitColor = hasStandardColorClass(className);
 
   let typeClasses = '';
   switch (type) {
     case 'title':
-      typeClasses = 'text-3xl font-bold leading-tight';
+      typeClasses = 'text-3xl leading-tight';
       break;
     case 'subtitle':
-      typeClasses = 'text-xl font-semibold';
+      typeClasses = 'text-xl';
       break;
     case 'defaultSemiBold':
-      typeClasses = 'text-base font-semibold leading-relaxed';
+      typeClasses = 'text-base leading-6';
       break;
     case 'link':
       typeClasses = 'text-base leading-relaxed text-brand-primary';
@@ -82,17 +128,42 @@ export function ThemedText({
     case 'small':
       typeClasses = 'text-sm';
       break;
+    case 'display':
+      typeClasses = 'text-[34px] leading-[40px]';
+      break;
+    case 'headline':
+      typeClasses = 'text-2xl leading-8';
+      break;
+    case 'kicker':
+      typeClasses = 'text-[11px] uppercase tracking-[1.4px]';
+      break;
+    case 'label':
+      typeClasses = 'text-[13px]';
+      break;
+    case 'caption':
+      typeClasses = 'text-xs leading-4';
+      break;
+    case 'figure':
+      typeClasses = 'text-base';
+      break;
+    case 'figureLg':
+      typeClasses = 'text-[34px] leading-[40px] tracking-[-0.5px]';
+      break;
     default:
       typeClasses = 'text-base leading-relaxed';
   }
 
+  const resolved = resolveWeight(`${typeClasses} ${className || ''}`, type);
+
   return (
     <Text
-      allowFontScaling={false}
+      // Respect the system text size, capped so layouts don't break.
+      maxFontSizeMultiplier={1.3}
       {...rest}
-      className={`${typeClasses} ${className || ''}`}
+      className={resolved.className}
       style={[
-        { fontFamily: TYPE_FONT[type] ?? 'PlusJakartaSans_400Regular' },
+        { fontFamily: resolved.fontFamily },
+        FIGURE_TYPES.has(type) ? tabularNums : null,
         !hasExplicitColor ? { color: defaultColor } : null,
         style,
       ]}

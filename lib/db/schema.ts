@@ -92,6 +92,10 @@ export const transactions = sqliteTable(
     recurring_id: integer('recurring_id').references(() => recurringExpenses.id, {
       onDelete: 'set null',
     }),
+    // Both halves of an account-to-account transfer share this key
+    transfer_group: text('transfer_group'),
+    // Set on deposits into / withdrawals from a savings goal
+    savings_goal_id: integer('savings_goal_id').references(() => savingsGoals.id, { onDelete: 'set null' }),
     // Audit timestamps
     created_at: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
     updated_at: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -267,6 +271,7 @@ export const householdExpenses = sqliteTable(
     amount: real('amount').notNull(),
     date: text('date').notNull(),
     notes: text('notes'),
+    linked_transaction_id: integer('linked_transaction_id').references(() => transactions.id, { onDelete: 'set null' }),
     created_at: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
@@ -316,6 +321,7 @@ export const loans = sqliteTable(
       .notNull()
       .references(() => accounts.id, { onDelete: 'cascade' }),
     transaction_id: integer('transaction_id').references(() => transactions.id, { onDelete: 'set null' }),
+    origin_transaction_id: integer('origin_transaction_id').references(() => transactions.id, { onDelete: 'set null' }),
     date: text('date').notNull(),
     due_date: text('due_date'),
     notes: text('notes'),

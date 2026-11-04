@@ -1,4 +1,4 @@
-import { advancePeriodStart, computePeriodRange } from '@/hooks/use-household';
+import { advancePeriodStart, computePeriodRange } from '@/features/household/hooks/use-household';
 import type { HouseholdConfig } from '@/lib/db/queries';
 
 function cfg(period: 'monthly' | 'weekly' | 'yearly', start: string, anchorDay?: number): HouseholdConfig {

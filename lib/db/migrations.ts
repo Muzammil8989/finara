@@ -7,7 +7,7 @@ import { logger } from '../logger';
  * Supports incremental schema evolution while maintaining data integrity
  */
 
-const DATABASE_VERSION = 8; // Increment this when adding new migrations
+const DATABASE_VERSION = 10; // Increment this when adding new migrations
 
 /**
  * Migration interface for type safety
@@ -337,6 +337,44 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 9,
+    description: 'Link loans to their origin transaction and household transfers to their income transaction',
+    up: async (db: SQLite.SQLiteDatabase) => {
+      const loanCols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(loans)`);
+      if (!loanCols.some(col => col.name === 'origin_transaction_id')) {
+        await db.execAsync(
+          `ALTER TABLE loans ADD COLUMN origin_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL;`
+        );
+      }
+
+      const householdCols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(household_expenses)`);
+      if (!householdCols.some(col => col.name === 'linked_transaction_id')) {
+        await db.execAsync(
+          `ALTER TABLE household_expenses ADD COLUMN linked_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL;`
+        );
+      }
+    },
+  },
+  {
+    version: 10,
+    description: 'Account-to-account transfers and savings goals funded from an account',
+    up: async (db: SQLite.SQLiteDatabase) => {
+      const cols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(transactions)`);
+      // Both halves of an account transfer share one group key.
+      if (!cols.some(col => col.name === 'transfer_group')) {
+        await db.execAsync(`ALTER TABLE transactions ADD COLUMN transfer_group TEXT;`);
+      }
+      // Deposits into / withdrawals from a savings goal.
+      if (!cols.some(col => col.name === 'savings_goal_id')) {
+        await db.execAsync(
+          `ALTER TABLE transactions ADD COLUMN savings_goal_id INTEGER REFERENCES savings_goals(id) ON DELETE SET NULL;`
+        );
+      }
+      await db.execAsync(`CREATE INDEX IF NOT EXISTS idx_transactions_transfer_group ON transactions(transfer_group);`);
+      await db.execAsync(`CREATE INDEX IF NOT EXISTS idx_transactions_savings_goal_id ON transactions(savings_goal_id);`);
+    },
+  },
 ];
 
 /**
@@ -501,6 +539,10 @@ export async function initializeDatabase(
   try {
     logger.info('Initializing database...');
     await runMigrations(db);
+    // SQLite ships with FK enforcement OFF per connection; without this every
+    // ON DELETE CASCADE / SET NULL / RESTRICT in the schema is ignored.
+    // Enabled after migrations because table rebuilds must run with FKs off.
+    await db.execAsync('PRAGMA foreign_keys = ON;');
     await seedDatabase(db);
     logger.info('Database initialization complete');
   } catch (error) {

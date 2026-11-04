@@ -1,7 +1,6 @@
-import { EmptyState, Skeleton, ThemedText } from '@/components/common';
-import { AddBudgetModal } from '@/features/budgets/components/add-budget-modal';
+import { EmptyState, Skeleton } from '@/components/common';
 import { BudgetWithSpend, useBudgets } from '@/features/budgets/hooks/use-budgets';
-import { useModals } from '@/context/modal-context';
+import { useModals } from '@/providers/modal-context';
 import { useUser } from '@/features/user/context/user-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { deleteBudget } from '@/lib/db/queries';
@@ -11,29 +10,28 @@ import * as Haptics from 'expo-haptics';
 import React, { useCallback, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BudgetCard } from './_budget/budget-card';
-import { BudgetHeader } from './_budget/budget-header';
-import { DeleteConfirmSheet } from './_budget/delete-confirm-sheet';
-import { PeriodFilter } from './_budget/utils';
+import { BudgetCard } from '@/features/budgets/components/budget-card';
+import { BudgetHeader } from '@/features/budgets/components/budget-header';
+import { DeleteConfirmSheet } from '@/features/budgets/components/delete-confirm-sheet';
+import { PeriodFilter, summarizeBudgets } from '@/features/budgets/utils';
 
-const PRIMARY_COLOR = '#246BFD';
-
+/** Mirrors BudgetCard's ruled-row layout so nothing jumps when data arrives. */
 function BudgetCardSkeleton() {
     return (
-        <View style={{ marginBottom: 12, padding: 16, borderRadius: 16, overflow: 'hidden' }}>
+        <View style={{ paddingVertical: 16 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                <Skeleton width={40} height={40} borderRadius={20} />
+                <Skeleton width={36} height={36} borderRadius={18} />
                 <View style={{ flex: 1, marginHorizontal: 12 }}>
-                    <Skeleton height={14} borderRadius={7} style={{ marginBottom: 6 }} />
-                    <Skeleton width="45%" height={11} borderRadius={6} />
+                    <Skeleton width="55%" height={14} borderRadius={4} style={{ marginBottom: 6 }} />
+                    <Skeleton width="30%" height={10} borderRadius={4} />
                 </View>
-                <Skeleton width={50} height={14} borderRadius={7} />
+                <View style={{ alignItems: 'flex-end' }}>
+                    <Skeleton width={64} height={14} borderRadius={4} style={{ marginBottom: 6 }} />
+                    <Skeleton width={48} height={10} borderRadius={4} />
+                </View>
             </View>
-            <Skeleton height={8} borderRadius={4} />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-                <Skeleton width="38%" height={11} borderRadius={6} />
-                <Skeleton width="22%" height={11} borderRadius={6} />
-            </View>
+            <Skeleton height={6} borderRadius={3} />
+            <Skeleton width="28%" height={10} borderRadius={4} style={{ marginTop: 8 }} />
         </View>
     );
 }
@@ -50,10 +48,9 @@ export default function BudgetScreen() {
     const { profile } = useUser();
     const insets = useSafeAreaInsets();
     const colors = useThemeColors();
-    const { openModal, refreshSignal, triggerRefresh } = useModals();
+    const { openModal, triggerRefresh } = useModals();
     const { budgets, loading, refresh } = useBudgets();
 
-    const [editingBudget, setEditingBudget] = useState<BudgetWithSpend | null>(null);
     const [deletingBudget, setDeletingBudget] = useState<BudgetWithSpend | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all');
@@ -66,15 +63,10 @@ export default function BudgetScreen() {
         [budgets, periodFilter],
     );
 
-    const { totalBudgeted, totalSpent, overallPercent } = useMemo(() => {
-        const budgeted = filteredBudgets.reduce((s, b) => s + b.amount, 0);
-        const spent = filteredBudgets.reduce((s, b) => s + b.spent, 0);
-        return {
-            totalBudgeted: budgeted,
-            totalSpent: spent,
-            overallPercent: budgeted > 0 ? Math.min((spent / budgeted) * 100, 100) : 0,
-        };
-    }, [filteredBudgets]);
+    const { totalBudgeted, totalSpent, overallPercent, isMonthlyEquivalent } = useMemo(
+        () => summarizeBudgets(filteredBudgets),
+        [filteredBudgets],
+    );
 
     const handleConfirmDelete = useCallback(async () => {
         if (!deletingBudget) return;
@@ -101,10 +93,8 @@ export default function BudgetScreen() {
     }, [refresh]);
 
     const handleAddPress = useCallback(() => openModal('budget'), [openModal]);
-    const handleEditBudget = useCallback((b: BudgetWithSpend) => setEditingBudget(b), []);
+    const handleEditBudget = useCallback((b: BudgetWithSpend) => openModal('budget', { budget: b }), [openModal]);
     const handleDeleteBudget = useCallback((b: BudgetWithSpend) => setDeletingBudget(b), []);
-    const handleCloseEditModal = useCallback(() => setEditingBudget(null), []);
-    const handleBudgetSuccess = useCallback(() => { setEditingBudget(null); refresh(); triggerRefresh(); }, [refresh, triggerRefresh]);
 
     const periodLabel = periodFilter !== 'all'
         ? periodFilter.charAt(0).toUpperCase() + periodFilter.slice(1) + ' '
@@ -122,8 +112,8 @@ export default function BudgetScreen() {
                     <RefreshControl
                         refreshing={isRefreshing}
                         onRefresh={handleRefresh}
-                        tintColor={PRIMARY_COLOR}
-                        colors={[PRIMARY_COLOR]}
+                        tintColor={colors.primary}
+                        colors={[colors.primary]}
                     />
                 }
             >
@@ -135,9 +125,10 @@ export default function BudgetScreen() {
                     totalSpent={totalSpent}
                     totalBudgeted={totalBudgeted}
                     overallPercent={overallPercent}
+                    isMonthlyEquivalent={isMonthlyEquivalent}
                     currency={profile.currency}
                     showSummary={!loading && filteredBudgets.length > 0}
-                    onAddPress={handleAddPress}
+                    count={loading ? undefined : filteredBudgets.length}
                 />
 
                 {/* Content */}
@@ -146,20 +137,17 @@ export default function BudgetScreen() {
                 ) : filteredBudgets.length === 0 ? (
                     <EmptyState
                         icon="pie-chart-outline"
-                        title={periodFilter === 'all' ? 'No Budgets Yet' : `No ${periodLabel}Budgets`}
+                        title={periodFilter === 'all' ? 'No budgets yet' : `No ${periodLabel.toLowerCase()}budgets`}
                         subtitle={
                             periodFilter === 'all'
-                                ? 'Create a budget to start tracking your spending.'
+                                ? 'Set a limit for a category and Folio will tell you when you get close.'
                                 : `No ${periodFilter} budgets. Try a different filter.`
                         }
-                        actionLabel={periodFilter === 'all' ? 'Create First Budget' : undefined}
+                        actionLabel={periodFilter === 'all' ? 'Create a budget' : undefined}
                         onAction={periodFilter === 'all' ? handleAddPress : undefined}
                     />
                 ) : (
-                    <View className="px-5 mt-2">
-                        <ThemedText className="text-[10px] font-bold uppercase text-textMuted dark:text-dark-textMuted mb-3">
-                            {filteredBudgets.length} {periodLabel}Budget{filteredBudgets.length !== 1 ? 's' : ''}
-                        </ThemedText>
+                    <View className="px-5">
                         {filteredBudgets.map(budget => (
                             <BudgetCard
                                 key={budget.id}
@@ -172,13 +160,6 @@ export default function BudgetScreen() {
                     </View>
                 )}
             </ScrollView>
-
-            <AddBudgetModal
-                visible={editingBudget !== null}
-                editBudget={editingBudget}
-                onClose={handleCloseEditModal}
-                onSuccess={handleBudgetSuccess}
-            />
 
             {deletingBudget && (
                 <DeleteConfirmSheet

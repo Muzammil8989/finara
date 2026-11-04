@@ -1,21 +1,16 @@
 import { ScreenHeader, ThemedText } from '@/components/common';
 import { useThemeColors } from '@/hooks/use-theme-colors';
-import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const LAST_UPDATED = 'May 2026';
-const APP_NAME = 'Finara';
+const APP_NAME = 'Folio';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-    const colors = useThemeColors();
     return (
         <View className="mb-7">
-            <ThemedText
-                className="text-sm font-black uppercase tracking-widest mb-3"
-                style={{ color: colors.primary }}
-            >
+            <ThemedText type="headline" className="text-xl leading-7 mb-3" accessibilityRole="header">
                 {title}
             </ThemedText>
             {children}
@@ -25,7 +20,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Para({ children }: { children: React.ReactNode }) {
     return (
-        <ThemedText className="text-sm leading-6 text-textPrimary dark:text-dark-textPrimary mb-3">
+        <ThemedText className="text-[15px] leading-6 text-textPrimary dark:text-dark-textPrimary mb-3">
             {children}
         </ThemedText>
     );
@@ -36,7 +31,7 @@ function BulletItem({ children }: { children: React.ReactNode }) {
     return (
         <View className="flex-row mb-2.5 pr-2">
             <View className="w-1.5 h-1.5 rounded-full mt-2 mr-3 flex-shrink-0" style={{ backgroundColor: colors.primary }} />
-            <ThemedText className="text-sm leading-6 flex-1 text-textPrimary dark:text-dark-textPrimary">
+            <ThemedText className="text-[15px] leading-6 flex-1 text-textPrimary dark:text-dark-textPrimary">
                 {children}
             </ThemedText>
         </View>
@@ -59,29 +54,21 @@ export default function TermsScreen() {
                 subtitle={`Last updated ${LAST_UPDATED}`}
                 withInsets
                 border
-                right={
-                    <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: `${colors.primary}15` }}>
-                        <Ionicons name="document-text-outline" size={18} color={colors.primary} />
-                    </View>
-                }
             />
 
             <ScrollView
                 className="flex-1"
-                contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 28, paddingBottom: insets.bottom + 40 }}
+                contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: insets.bottom + 40 }}
                 showsVerticalScrollIndicator={false}
             >
                 {/* Intro */}
-                <View
-                    className="rounded-2xl p-4 mb-8"
-                    style={{ backgroundColor: `${colors.primary}0D`, borderWidth: 1, borderColor: `${colors.primary}20` }}
-                >
-                    <ThemedText className="text-sm leading-6 text-textPrimary dark:text-dark-textPrimary">
+                <View className="mb-7">
+                    <ThemedText className="text-[17px] leading-[26px]" style={{ color: colors.textSecondary }}>
                         By using {APP_NAME}, you agree to these terms. We have written them in plain language so you know exactly what this app is, what it is not, and what your responsibilities are.
                     </ThemedText>
                 </View>
 
-                <Section title="1. What Finara Is">
+                <Section title="1. What Folio Is">
                     <Para>
                         {APP_NAME} is a personal budgeting tool. You use it to write down your income and expenses, set spending limits, and keep track of savings. That is all it does.
                     </Para>
@@ -182,7 +169,7 @@ export default function TermsScreen() {
 
                 <Section title="10. Questions">
                     <Para>
-                        If you have any questions about these terms, you can reach out to us through the app's support channel.
+                        If you have any questions about these terms, you can reach out to us through the app’s support channel.
                     </Para>
                 </Section>
             </ScrollView>

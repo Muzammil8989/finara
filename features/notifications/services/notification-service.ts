@@ -50,7 +50,7 @@ export const NotificationService = {
             await Notifications.scheduleNotificationAsync({
                 identifier: DAILY_REMINDER_ID,
                 content: {
-                    title: 'Finara Daily Reminder',
+                    title: 'Folio Daily Reminder',
                     body: "Don't forget to log today's expenses & income!",
                     sound: true,
                 },
@@ -90,7 +90,12 @@ export const NotificationService = {
         }
     },
 
-    async checkAndSendBudgetAlert(categoryId: number, newAmount: number): Promise<void> {
+    /**
+     * Alert once when an expense pushes a budget across its threshold.
+     * `date` is the expense's date: an expense outside a budget's current
+     * period doesn't change that period's spend, so it can't trigger it.
+     */
+    async checkAndSendBudgetAlert(categoryId: number, newAmount: number, date?: string): Promise<void> {
         try {
             if (!(await this.isEnabled())) return;
             const profile = await UserService.getProfile();
@@ -99,6 +104,7 @@ export const NotificationService = {
 
             for (const budget of relevant) {
                 const { startDate, endDate } = getPeriodDateRange(budget.period);
+                if (date && (date < startDate || date > endDate)) continue;
                 const spendResult = await getBudgetSpend(budget.category_id, startDate, endDate);
                 const spent = Number(spendResult[0]?.total) || 0;
                 const threshold = budget.alert_threshold ?? 80;
@@ -106,11 +112,12 @@ export const NotificationService = {
                 const prevPercent = budget.amount > 0 ? ((spent - newAmount) / budget.amount) * 100 : 0;
                 if (percentUsed >= threshold && prevPercent < threshold) {
                     const remaining = budget.amount - spent;
-                    const formattedRemaining = UserService.formatCurrency(Math.abs(remaining), profile.currency);
+                    const formatted = UserService.formatCurrency(Math.abs(remaining), profile.currency);
+                    const tail = remaining < 0 ? `over by ${formatted}` : `${formatted} left`;
                     await Notifications.scheduleNotificationAsync({
                         content: {
                             title: 'Budget Alert',
-                            body: `${budget.categoryName || 'Overall'} budget is ${Math.round(percentUsed)}% used — ${formattedRemaining} left`,
+                            body: `${budget.categoryName || 'Overall'} budget is ${Math.round(percentUsed)}% used — ${tail}`,
                             sound: true,
                         },
                         trigger: null,

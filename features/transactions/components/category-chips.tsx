@@ -3,7 +3,8 @@ import { useThemeColors } from '@/hooks/use-theme-colors';
 import { IoniconsName } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
+import { Pressable } from '@/components/common/pressable';
 
 interface Category {
     id: number;
@@ -52,23 +53,27 @@ export function CategoryChips({ categories, selectedCategoryId, onSelect }: Cate
                             <Pressable
                                 key={category.id}
                                 onPress={() => onSelect(category.id)}
-                                className="flex-1 rounded-2xl items-center justify-center py-3.5 px-2"
-                                style={{
-                                    backgroundColor: isSelected ? `${categoryColor}20` : colors.backgroundAlt,
-                                    borderWidth: 2,
-                                    borderColor: isSelected ? categoryColor : `${categoryColor}28`,
-                                }}
+                                accessibilityRole="radio"
+                                accessibilityState={{ selected: isSelected }}
+                                accessibilityLabel={category.name}
+                                className="flex-1 rounded-xl items-center justify-center py-3 px-2 min-h-[72px]"
+                                style={({ pressed }) => ({
+                                    backgroundColor: isSelected ? colors.surface : pressed ? colors.backgroundAlt : 'transparent',
+                                    borderWidth: isSelected ? 1.5 : 1,
+                                    borderColor: isSelected ? colors.textPrimary : colors.divider,
+                                })}
                             >
-                                <View
-                                    className="w-10 h-10 rounded-xl items-center justify-center mb-2"
-                                    style={{ backgroundColor: isSelected ? `${categoryColor}30` : `${categoryColor}18` }}
-                                >
-                                    <Ionicons name={categoryIcon} size={20} color={categoryColor} />
-                                </View>
+                                {isSelected && (
+                                    <View style={{ position: 'absolute', top: 6, right: 6 }}>
+                                        <Ionicons name="checkmark-circle" size={14} color={colors.textPrimary} />
+                                    </View>
+                                )}
+                                <Ionicons name={categoryIcon} size={20} color={categoryColor} style={{ marginBottom: 6 }} />
                                 <ThemedText
                                     numberOfLines={1}
-                                    className="text-[11px] font-bold text-center"
-                                    style={{ color: isSelected ? categoryColor : colors.textSecondary }}
+                                    type="label"
+                                    className="text-[12px] text-center"
+                                    style={{ color: isSelected ? colors.textPrimary : colors.textSecondary }}
                                 >
                                     {category.name}
                                 </ThemedText>

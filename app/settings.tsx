@@ -1,34 +1,33 @@
+import { useModalActions } from '@/providers/modal-context';
 import { useAuth } from '@/features/auth/context/auth-context';
 import { useUser } from '@/features/user/context/user-context';
-import { clearDatabase } from '@/lib/db/migrations';
+import { useFactoryReset } from '@/features/auth/hooks/use-factory-reset';
 import { SecurityService } from '@/features/auth/services/security-service';
 import { logger } from '@/lib/logger';
 import { useNotifications } from '@/features/notifications/hooks/use-notifications';
 import * as ImagePicker from 'expo-image-picker';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { router } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
-import { useColorScheme as useNWColorScheme } from 'nativewind';
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { DataBackupSection } from './_settings/data-backup-section';
-import { DangerZone } from './_settings/danger-zone';
-import { LegalSection } from './_settings/legal-section';
-import { EditProfileSheet } from './_settings/edit-profile-sheet';
-import { ManagementSection } from './_settings/management-section';
-import { PreferencesSection } from './_settings/preferences-section';
-import { ProfileCard } from './_settings/profile-card';
-import { SecuritySection } from './_settings/security-section';
-import { SettingsHeader } from './_settings/settings-header';
+import { DataBackupSection } from '@/features/settings/components/data-backup-section';
+import { DangerZone } from '@/features/settings/components/danger-zone';
+import { LegalSection } from '@/features/settings/components/legal-section';
+import { EditProfileSheet } from '@/features/settings/components/edit-profile-sheet';
+import { ManagementSection } from '@/features/settings/components/management-section';
+import { PreferencesSection } from '@/features/settings/components/preferences-section';
+import { ProfileCard } from '@/features/settings/components/profile-card';
+import { SecuritySection } from '@/features/settings/components/security-section';
+import { SettingsHeader } from '@/features/settings/components/settings-header';
 
 export default function SettingsScreen() {
     const insets = useSafeAreaInsets();
-    const { colorScheme } = useNWColorScheme();
     const { isSecurityEnabled } = useAuth();
+    const factoryReset = useFactoryReset();
+    const { triggerRefresh } = useModalActions();
     const { profile, updateProfile } = useUser();
-    const db = useSQLiteContext();
 
     const { enabled: notifEnabled, toggle: toggleNotifications } = useNotifications();
 
@@ -112,7 +111,10 @@ const openProfileModal = () => {
                 if (!result.success) return;
             }
         } catch (e) {
+            // Never fall through to a destructive reset when auth errors.
             logger.error('Auth failed', e);
+            Alert.alert('Authentication failed', 'Factory reset was cancelled.');
+            return;
         }
 
         Alert.alert(
@@ -124,12 +126,15 @@ const openProfileModal = () => {
                     text: 'Reset Everything',
                     style: 'destructive',
                     onPress: async () => {
-                        await clearDatabase(db);
-                        await SecurityService.clearSecurity();
-                        await updateProfile({ name: '', avatar: null, currency: 'USD', isOnboarded: false });
-                        Alert.alert('Success', 'Application reset complete. Returning to setup.', [
-                            { text: 'OK', onPress: () => router.replace('/onboarding') },
-                        ]);
+                        try {
+                            await factoryReset();
+                            Alert.alert('Success', 'Application reset complete. Returning to setup.', [
+                                { text: 'OK', onPress: () => router.replace('/onboarding') },
+                            ]);
+                        } catch (e) {
+                            logger.error('Factory reset failed', e);
+                            Alert.alert('Reset failed', 'Something went wrong while resetting. Please try again.');
+                        }
                     },
                 },
             ],
@@ -142,10 +147,10 @@ const openProfileModal = () => {
 
             <ScrollView
                 className="flex-1"
-                contentContainerStyle={{ paddingBottom: 100 }}
+                contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 40 }}
                 showsVerticalScrollIndicator={false}
             >
-                <View className="px-6">
+                <View className="px-5">
                     <ProfileCard
                         name={profile.name}
                         avatar={profile.avatar}
@@ -155,7 +160,7 @@ const openProfileModal = () => {
                     <ManagementSection />
 
                     <PreferencesSection
-                        colorScheme={colorScheme ?? 'light'}
+                        theme={profile.theme}
                         currency={profile.currency}
                         notifEnabled={notifEnabled}
                         onThemeSelect={(mode) => updateProfile({ theme: mode })}
@@ -173,7 +178,11 @@ const openProfileModal = () => {
                     />
 
                     <DataBackupSection
-                        onRestoreComplete={() => router.replace('/(tabs)')}
+                        onRestoreComplete={() => {
+                            // Mounted tab screens hold the pre-restore data.
+                            triggerRefresh();
+                            router.replace('/(tabs)');
+                        }}
                     />
 
                     <LegalSection />

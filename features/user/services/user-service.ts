@@ -69,7 +69,8 @@ export const UserService = {
 
     formatCurrency(amount: number, code: string): string {
         const symbol = this.getCurrencySymbol(code);
-        return `${symbol}${Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const sign = amount < 0 ? '-' : '';
+        return `${sign}${symbol}${Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     },
 };
 

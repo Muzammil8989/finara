@@ -1,4 +1,4 @@
-import { numberToWords, formatWithCommas } from '@/lib/format-amount';
+import { numberToWords, formatWithCommas } from '@/lib/utils/format-amount';
 
 describe('numberToWords', () => {
   it('returns Zero for 0', () => {

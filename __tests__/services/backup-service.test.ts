@@ -1,5 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-import { BackupService } from '@/services/backup-service';
+import { BackupService } from '@/features/backup/services/backup-service';
 import { NotificationService } from '@/features/notifications/services/notification-service';
 
 // Force the iOS code path (writes to the app Documents dir, no folder picker).
@@ -59,7 +59,7 @@ describe('BackupService.runAutoBackupIfNeeded', () => {
         expect(result).toBe(true);
         expect(mockSendBackupComplete).toHaveBeenCalledTimes(1);
         expect(mockSendBackupComplete).toHaveBeenCalledWith(
-            expect.stringMatching(/^finara-backup-\d{4}-\d{2}-\d{2}\.json$/),
+            expect.stringMatching(/^folio-backup-\d{4}-\d{2}-\d{2}\.json$/),
         );
         // The successful backup time must be persisted.
         expect(mockSetItem).toHaveBeenCalledWith(LAST_BACKUP_KEY, expect.any(String));

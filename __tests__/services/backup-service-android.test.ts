@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
-import { BackupService } from '@/services/backup-service';
+import { BackupService } from '@/features/backup/services/backup-service';
 
 // Force the Android (Storage Access Framework) code path.
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
@@ -58,7 +58,7 @@ describe('BackupService.saveToDevice (Android SAF)', () => {
         expect(result).not.toBeNull();
         expect(SAF.createFileAsync).toHaveBeenCalledWith(
             'content://tree/Saved',
-            expect.stringMatching(/^finara-backup-\d{4}-\d{2}-\d{2}\.json$/),
+            expect.stringMatching(/^folio-backup-\d{4}-\d{2}-\d{2}\.json$/),
             'application/json',
         );
         expect(SAF.requestDirectoryPermissionsAsync).not.toHaveBeenCalled();

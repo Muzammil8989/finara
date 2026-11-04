@@ -1,8 +1,10 @@
+import { parseAmount } from '@/lib/utils/currency';
+import tokens from '@/theme/tokens';
 import { AppButton, EmptyState, ScreenHeader, ThemedText } from '@/components/common';
 import { useUser } from '@/features/user/context/user-context';
 import { UserService } from '@/features/user/services/user-service';
 import {
-    Account,
+    AccountWithBalance,
     createAccount,
     deleteAccount,
     getAccountsWithBalance,
@@ -13,8 +15,6 @@ import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
 import { IoniconsName } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -40,10 +40,7 @@ const ACCOUNT_TYPES: { value: AccountType; label: string; icon: IoniconsName }[]
     { value: 'other', label: 'Other', icon: 'ellipsis-horizontal-circle' },
 ];
 
-const ACCOUNT_COLORS = [
-    '#246BFD', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
-    '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16'
-];
+const ACCOUNT_COLORS: string[] = tokens.swatches;
 
 const ACCOUNT_ICONS = [
     'wallet', 'card', 'cash', 'business', 'briefcase',
@@ -56,7 +53,7 @@ function DeleteConfirmSheet({
     onConfirm,
     isDeleting,
 }: {
-    account: Account;
+    account: AccountWithBalance;
     onCancel: () => void;
     onConfirm: () => void;
     isDeleting: boolean;
@@ -71,32 +68,24 @@ function DeleteConfirmSheet({
                     exiting={FadeOutDown.duration(200).easing(Easing.in(Easing.cubic))}
                     style={{
                         backgroundColor: colors.surface,
-                        borderTopLeftRadius: 40,
-                        borderTopRightRadius: 40,
-                        paddingHorizontal: 28,
-                        paddingTop: 36,
+                        borderTopLeftRadius: 24,
+                        borderTopRightRadius: 24,
+                        paddingHorizontal: 24,
+                        paddingTop: 16,
                         paddingBottom: insets.bottom + 32,
                         overflow: 'hidden',
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: -4 },
-                        shadowOpacity: 0.15,
-                        shadowRadius: 20,
-                        elevation: 24,
+                        borderTopWidth: 1,
+                        borderColor: colors.divider,
                     }}
                 >
-                    <LinearGradient
-                        colors={[`${colors.error}1F`, `${colors.error}0A`, 'transparent']}
-                        className="absolute top-0 left-0 right-0 h-40"
-                    />
-                    <View className="w-12 h-1.5 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-8" />
-                    <View className="w-16 h-16 rounded-3xl items-center justify-center mx-auto mb-5"
-                        style={{ backgroundColor: `${colors.error}18` }}>
-                        <Ionicons name="trash-outline" size={30} color={colors.error} />
+                    <View className="w-9 h-1 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-5" />
+                    <View className="w-16 h-16 rounded-full items-center justify-center mx-auto mb-5 border border-divider dark:border-dark-divider">
+                        <Ionicons name="trash-outline" size={30} color={colors.expense} />
                     </View>
-                    <ThemedText className="text-xl font-bold text-center mb-2">
+                    <ThemedText type="headline" className="text-center mb-2" accessibilityRole="header">
                         Delete Account
                     </ThemedText>
-                    <ThemedText className="text-sm text-center text-textMuted dark:text-dark-textMuted leading-6 mb-8 px-4">
+                    <ThemedText className="text-[15px] text-center text-textSecondary dark:text-dark-textSecondary leading-6 mb-7 px-2">
                         Delete{' '}
                         <ThemedText className="font-bold text-textPrimary dark:text-dark-textPrimary">
                             {account.name}
@@ -106,7 +95,7 @@ function DeleteConfirmSheet({
                     <View className="flex-row gap-3">
                         <Pressable
                             onPress={onCancel}
-                            className="flex-1 py-4 rounded-2xl items-center border border-borderSoft dark:border-dark-borderSoft"
+                            className="flex-1 py-4 rounded-xl items-center border border-borderSoft dark:border-dark-borderSoft"
                             style={{ backgroundColor: colors.backgroundAlt }}
                         >
                             <ThemedText className="font-semibold text-sm">Cancel</ThemedText>
@@ -114,8 +103,8 @@ function DeleteConfirmSheet({
                         <Pressable
                             onPress={onConfirm}
                             disabled={isDeleting}
-                            className="flex-1 py-4 rounded-2xl items-center"
-                            style={{ backgroundColor: colors.error, elevation: 6 }}
+                            className="flex-1 py-4 rounded-xl items-center"
+                            style={{ backgroundColor: colors.expense }}
                         >
                             {isDeleting
                                 ? <ActivityIndicator color={colors.white} size="small" />
@@ -133,11 +122,11 @@ export default function PaymentMethodsScreen() {
     const insets = useSafeAreaInsets();
     const colors = useThemeColors();
     const { profile } = useUser();
-    const [accounts, setAccounts] = useState<Account[]>([]);
+    const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
     const [loading, setLoading] = useState(true);
     const [modalVisible, setModalVisible] = useState(false);
-    const [editingAccount, setEditingAccount] = useState<Account | null>(null);
-    const [deletingAccount, setDeletingAccount] = useState<Account | null>(null);
+    const [editingAccount, setEditingAccount] = useState<AccountWithBalance | null>(null);
+    const [deletingAccount, setDeletingAccount] = useState<AccountWithBalance | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
 
     // Form state
@@ -180,11 +169,12 @@ export default function PaymentMethodsScreen() {
         setModalVisible(true);
     };
 
-    const openEditModal = (account: Account) => {
+    const openEditModal = (account: AccountWithBalance) => {
         setEditingAccount(account);
         setName(account.name);
         setType(account.type);
-        setBalance(account.balance.toString());
+        // Edit the stored opening balance; `balance` includes all transactions.
+        setBalance(account.initial_balance.toString());
         setSelectedColor(account.color || ACCOUNT_COLORS[0]);
         setSelectedIcon((account.icon as typeof ACCOUNT_ICONS[number]) || 'wallet');
         setModalVisible(true);
@@ -196,7 +186,7 @@ export default function PaymentMethodsScreen() {
             return;
         }
 
-        const numBalance = parseFloat(balance) || 0;
+        const numBalance = parseAmount(balance) || 0;
 
         setIsSubmitting(true);
         try {
@@ -230,7 +220,7 @@ export default function PaymentMethodsScreen() {
         }
     };
 
-    const handleDelete = (account: Account) => {
+    const handleDelete = (account: AccountWithBalance) => {
         setDeletingAccount(account);
     };
 
@@ -263,20 +253,16 @@ export default function PaymentMethodsScreen() {
             >
                 <Animated.View
                     entering={FadeInDown.duration(350)}
-                    className="bg-surface dark:bg-dark-surface rounded-t-[40px] px-8 pt-10 max-h-[90%]"
+                    className="bg-surface dark:bg-dark-surface rounded-t-3xl px-6 pt-4 max-h-[90%]"
                     style={{ paddingBottom: insets.bottom + 40 }}
                 >
-                    <LinearGradient
-                        colors={[`${colors.primary}1A`, `${colors.primary}0D`, 'transparent']}
-                        className="absolute top-0 left-0 right-0 h-[30%]"
-                    />
-                    <View className="w-12 h-1.5 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-8" />
+                    <View className="w-9 h-1 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-5" />
                     <View className="flex-row justify-between items-center mb-8">
                         <ThemedText type="title" className="text-2xl font-bold">
                             {editingAccount ? 'Edit Payment Method' : 'Add Payment Method'}
                         </ThemedText>
                         <Pressable onPress={() => setModalVisible(false)} className="p-2">
-                            <Ionicons name="close" size={24} color={colors.error} />
+                            <Ionicons name="close" size={24} color={colors.expense} />
                         </Pressable>
                     </View>
 
@@ -287,7 +273,7 @@ export default function PaymentMethodsScreen() {
                     >
                         {/* Name Input */}
                         <View className="mb-6">
-                            <ThemedText className="text-[10px] font-bold text-textMuted mb-2 uppercase">
+                            <ThemedText type="kicker" className="mb-2">
                                 Name
                             </ThemedText>
                             <TextInput
@@ -295,14 +281,14 @@ export default function PaymentMethodsScreen() {
                                 onChangeText={setName}
                                 placeholder="e.g., Chase Bank, Cash Wallet"
                                 placeholderTextColor={colors.textMuted}
-                                className="w-full rounded-2xl px-6 py-4 text-textPrimary dark:text-dark-textPrimary text-base font-semibold"
+                                className="w-full rounded-xl px-6 py-4 text-textPrimary dark:text-dark-textPrimary text-base font-semibold"
                                 style={{ backgroundColor: colors.backgroundAlt, fontFamily: 'PlusJakartaSans_600SemiBold' }}
                             />
                         </View>
 
                         {/* Type Selection */}
                         <View className="mb-6">
-                            <ThemedText className="text-[10px] font-bold text-textMuted mb-3 uppercase">
+                            <ThemedText type="kicker" className="mb-3">
                                 Type
                             </ThemedText>
                             <View className="flex-row flex-wrap gap-3">
@@ -331,7 +317,7 @@ export default function PaymentMethodsScreen() {
 
                         {/* Balance Input */}
                         <View className="mb-6">
-                            <ThemedText className="text-[10px] font-bold text-textMuted mb-2 uppercase">
+                            <ThemedText type="kicker" className="mb-2">
                                 Initial Balance
                             </ThemedText>
                             <TextInput
@@ -340,14 +326,14 @@ export default function PaymentMethodsScreen() {
                                 placeholder="0.00"
                                 placeholderTextColor={colors.textMuted}
                                 keyboardType="decimal-pad"
-                                className="w-full rounded-2xl px-6 py-4 text-textPrimary dark:text-dark-textPrimary text-base font-semibold"
+                                className="w-full rounded-xl px-6 py-4 text-textPrimary dark:text-dark-textPrimary text-base font-semibold"
                                 style={{ backgroundColor: colors.backgroundAlt, fontFamily: 'SpaceGrotesk_600SemiBold' }}
                             />
                         </View>
 
                         {/* Icon Selection */}
                         <View className="mb-6">
-                            <ThemedText className="text-[10px] font-bold text-textMuted mb-3 uppercase">
+                            <ThemedText type="kicker" className="mb-3">
                                 Icon
                             </ThemedText>
                             <View className="flex-row flex-wrap gap-3">
@@ -355,7 +341,7 @@ export default function PaymentMethodsScreen() {
                                     <Pressable
                                         key={icon}
                                         onPress={() => setSelectedIcon(icon)}
-                                        className="w-14 h-14 rounded-2xl items-center justify-center"
+                                        className="w-14 h-14 rounded-xl items-center justify-center"
                                         style={{ backgroundColor: selectedIcon === icon ? colors.primary : colors.backgroundAlt }}
                                     >
                                         <Ionicons
@@ -370,7 +356,7 @@ export default function PaymentMethodsScreen() {
 
                         {/* Color Selection */}
                         <View className="mb-8">
-                            <ThemedText className="text-[10px] font-bold text-textMuted mb-3 uppercase">
+                            <ThemedText type="kicker" className="mb-3">
                                 Color
                             </ThemedText>
                             <View className="flex-row flex-wrap gap-3">
@@ -378,11 +364,13 @@ export default function PaymentMethodsScreen() {
                                     <Pressable
                                         key={color}
                                         onPress={() => setSelectedColor(color)}
-                                        className="w-14 h-14 rounded-2xl items-center justify-center"
+                                        accessibilityRole="radio"
+                                        accessibilityState={{ selected: selectedColor === color }}
+                                        className="w-14 h-14 rounded-xl items-center justify-center"
                                         style={{
                                             backgroundColor: color,
                                             borderWidth: selectedColor === color ? 3 : 0,
-                                            borderColor: colors.white,
+                                            borderColor: colors.textPrimary,
                                         }}
                                     >
                                         {selectedColor === color && (
@@ -407,10 +395,6 @@ export default function PaymentMethodsScreen() {
 
     return (
         <View className="flex-1 bg-background dark:bg-dark-background">
-            <LinearGradient
-                colors={[`${colors.primary}1A`, `${colors.primary}0D`, 'transparent']}
-                className="absolute top-0 left-0 right-0 h-[30%]"
-            />
             <ScrollView
                 className="flex-1"
                 style={{ paddingTop: insets.top }}
@@ -422,7 +406,7 @@ export default function PaymentMethodsScreen() {
                     right={
                         <Pressable
                             onPress={openAddModal}
-                            className="w-11 h-11 rounded-2xl bg-primary items-center justify-center"
+                            className="w-11 h-11 rounded-xl bg-primary items-center justify-center"
                         >
                             <Ionicons name="add" size={26} color={colors.white} />
                         </Pressable>
@@ -430,7 +414,7 @@ export default function PaymentMethodsScreen() {
                 />
 
                 {/* Payment Methods List */}
-                <View className="px-6">
+                <View className="px-5">
                     {loading ? (
                         <View className="py-20 items-center">
                             <ActivityIndicator size="large" color={colors.primary} />
@@ -449,7 +433,7 @@ export default function PaymentMethodsScreen() {
                                 <Animated.View
                                     key={account.id}
                                     entering={FadeInDown.delay(index * 100).springify()}
-                                    className="bg-backgroundAlt dark:bg-dark-backgroundAlt rounded-3xl p-5"
+                                    className="bg-surface dark:bg-dark-surface border border-divider dark:border-dark-divider rounded-xl p-4"
                                 >
                                     <View className="flex-row items-center">
                                         <View className="w-12 h-12 items-center justify-center mr-4">
@@ -473,17 +457,21 @@ export default function PaymentMethodsScreen() {
                                         <View className="flex-row gap-2">
                                             <Pressable
                                                 onPress={() => openEditModal(account)}
+                                                accessibilityRole="button"
+                                                accessibilityLabel={`Edit ${account.name}`}
                                                 className="w-10 h-10 rounded-xl items-center justify-center"
-                                                style={{ backgroundColor: `${colors.primary}15` }}
+                                                style={{ borderWidth: 1, borderColor: colors.borderStrong }}
                                             >
                                                 <Ionicons name="create-outline" size={20} color={colors.primary} />
                                             </Pressable>
                                             <Pressable
                                                 onPress={() => handleDelete(account)}
+                                                accessibilityRole="button"
+                                                accessibilityLabel={`Delete ${account.name}`}
                                                 className="w-10 h-10 rounded-xl items-center justify-center"
-                                                style={{ backgroundColor: `${colors.error}15` }}
+                                                style={{ borderWidth: 1, borderColor: colors.borderStrong }}
                                             >
-                                                <Ionicons name="trash-outline" size={20} color={colors.error} />
+                                                <Ionicons name="trash-outline" size={20} color={colors.expense} />
                                             </Pressable>
                                         </View>
                                     </View>

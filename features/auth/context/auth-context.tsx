@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { logger } from '@/lib/logger';
 import { SecurityService } from '../services/security-service';
 
@@ -13,35 +14,38 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * Re-lock when the app has been in the background longer than this.
+ * A grace period keeps short system hand-offs (photo picker, file picker,
+ * share sheet) from bouncing the user to the lock screen.
+ */
+export const RELOCK_AFTER_MS = 30_000;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [isLocked, setIsLocked] = useState(true);
     const [isSecurityEnabled, setIsSecurityEnabled] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const securityEnabledRef = useRef(false);
+    const backgroundedAtRef = useRef<number | null>(null);
 
+    const applySecurityEnabled = (enabled: boolean) => {
+        securityEnabledRef.current = enabled;
+        setIsSecurityEnabled(enabled);
+        if (!enabled) setIsLocked(false);
+    };
+
+    // The biometric prompt is NOT triggered here: the LockScreen prompts when
+    // it mounts. Prompting in both places opened two prompts at cold start.
     useEffect(() => {
         let mounted = true;
 
         const checkSecurity = async () => {
             try {
                 const isConfigured = await SecurityService.isSecurityConfigured();
-                if (!mounted) return;
-                setIsSecurityEnabled(isConfigured);
-                if (!isConfigured) {
-                    setIsLocked(false);
-                } else {
-                    try {
-                        const bioPref = await SecurityService.getBiometricPreference();
-                        if (bioPref && mounted) {
-                            const success = await SecurityService.authenticateBio();
-                            if (success && mounted) setIsLocked(false);
-                        }
-                    } catch (bioError) {
-                        logger.warn('Biometric auto-auth failed, falling back to PIN', bioError);
-                    }
-                }
+                if (mounted) applySecurityEnabled(isConfigured);
             } catch (error) {
                 logger.error('Failed to check security configuration', error);
-                if (mounted) { setIsSecurityEnabled(false); setIsLocked(false); }
+                if (mounted) applySecurityEnabled(false);
             } finally {
                 if (mounted) setIsLoading(false);
             }
@@ -51,17 +55,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return () => { mounted = false; };
     }, []);
 
-    const recheckSecurity = async () => {
+    useEffect(() => {
+        const sub = AppState.addEventListener('change', (state) => {
+            if (state === 'background') {
+                backgroundedAtRef.current = Date.now();
+            } else if (state === 'active') {
+                const since = backgroundedAtRef.current;
+                backgroundedAtRef.current = null;
+                if (securityEnabledRef.current && since !== null && Date.now() - since >= RELOCK_AFTER_MS) {
+                    setIsLocked(true);
+                }
+            }
+        });
+        return () => sub.remove();
+    }, []);
+
+    const recheckSecurity = useCallback(async () => {
         try {
-            const isConfigured = await SecurityService.isSecurityConfigured();
-            setIsSecurityEnabled(isConfigured);
-            if (!isConfigured) setIsLocked(false);
+            applySecurityEnabled(await SecurityService.isSecurityConfigured());
         } catch (error) {
             logger.error('Failed to recheck security', error);
         }
-    };
+    }, []);
 
-    const unlock = async (pin?: string): Promise<boolean> => {
+    const unlock = useCallback(async (pin?: string): Promise<boolean> => {
         try {
             const success = pin
                 ? await SecurityService.verifyPin(pin)
@@ -72,10 +89,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             logger.error('Unlock failed', error);
             return false;
         }
-    };
+    }, []);
+
+    const lock = useCallback(() => setIsLocked(true), []);
 
     return (
-        <AuthContext.Provider value={{ isLocked, isSecurityEnabled, unlock, lock: () => setIsLocked(true), recheckSecurity, isLoading }}>
+        <AuthContext.Provider value={{ isLocked, isSecurityEnabled, unlock, lock, recheckSecurity, isLoading }}>
             {children}
         </AuthContext.Provider>
     );

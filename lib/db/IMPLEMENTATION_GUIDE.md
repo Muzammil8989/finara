@@ -4,7 +4,7 @@ A complete, production-ready database solution for the Wealthflow React Native p
 
 ## 📦 What You're Getting
 
-### 7 Core Files
+### Core Files
 
 | File | Lines | Purpose |
 |------|-------|---------|
@@ -12,11 +12,8 @@ A complete, production-ready database solution for the Wealthflow React Native p
 | `migrations.ts` | 392 | Database versioning, migrations, seeding system |
 | `db-client.ts` | 74 | Singleton instance management and lifecycle |
 | `queries.ts` | 614 | CRUD operations and query helpers for all tables |
-| `advanced-queries.ts` | 437 | Analytics, reporting, and dashboard queries |
-| `integration-example.ts` | ~300 | Real-world usage examples (15 scenarios) |
 | `README.md` | 450+ | Complete documentation |
 
-**Total: 2,500+ lines of production-ready code**
 
 ---
 
@@ -251,61 +248,6 @@ await deleteBudget(id);
 
 ---
 
-## 📈 Advanced Queries
-
-### Dashboard Analytics
-
-```typescript
-import { getDashboardSummary } from '@/lib/db/advanced-queries';
-
-const dashboard = await getDashboardSummary('2024-01-01', '2024-01-31');
-// Returns:
-// {
-//   income: 5000,
-//   expenses: 1200,
-//   net: 3800,
-//   savingsRate: 76,
-//   topCategories: [...],
-//   accountsSummary: {...}
-// }
-```
-
-### Spending Analysis
-
-```typescript
-// By category (pie chart data)
-const categories = await getSpendingByCategory(startDate, endDate);
-
-// Daily trend (line chart data)
-const trend = await getDailySpendingTrend(startDate, endDate);
-
-// Top categories
-const top5 = await getTopCategories(5, startDate, endDate);
-
-// Category statistics
-const stats = await getCategoryStatistics(startDate, endDate);
-```
-
-### Account Analysis
-
-```typescript
-// Account summary with net worth
-const accounts = await getAccountsSummary();
-// Returns: { accounts: [...], totalNetWorth: 5000 }
-
-// Monthly comparison
-const comparison = await getMonthlyComparison(
-  current_start, current_end,
-  previous_start, previous_end
-);
-
-// Spending velocity
-const velocity = await getSpendingVelocity(startDate, endDate);
-// Returns: { dailyAverage, weeklyProjection, monthlyProjection }
-```
-
----
-
 ## 🔒 Data Integrity
 
 ### Constraints Enforced
@@ -418,28 +360,6 @@ async function checkBudgetStatus(month) {
       // Alert: Budget exceeded
     }
   }
-}
-```
-
-### Example 4: Monthly Financial Report
-
-```typescript
-async function generateMonthlyReport(month) {
-  const [startDate, endDate] = getMonthRange(month);
-
-  const summary = await getDashboardSummary(startDate, endDate);
-  const byCategory = await getSpendingByCategory(startDate, endDate);
-  const trend = await getDailySpendingTrend(startDate, endDate);
-
-  return {
-    period: month,
-    totalIncome: summary.income,
-    totalExpenses: summary.expenses,
-    netSavings: summary.net,
-    savingsRate: summary.savingsRate,
-    categoryBreakdown: byCategory,
-    dailyTrend: trend
-  };
 }
 ```
 
@@ -593,7 +513,6 @@ const { transactions, loading, refresh } = useTransactions({
 |------|----------|
 | `README.md` | Complete schema documentation, usage guide, best practices |
 | `IMPLEMENTATION_GUIDE.md` | This file - setup and integration guide |
-| `integration-example.ts` | 15 real-world usage examples |
 | `schema.ts` | Inline JSDoc comments explaining each field |
 | `queries.ts` | Inline JSDoc for all query functions |
 
@@ -763,7 +682,6 @@ Before deploying to production:
 
 - **Schema Questions**: See `lib/db/README.md`
 - **API Questions**: See inline JSDoc in `queries.ts`
-- **Usage Examples**: See `integration-example.ts`
 - **Implementation**: See this guide
 
 ---

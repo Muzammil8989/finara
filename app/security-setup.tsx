@@ -1,14 +1,13 @@
 import { IconSymbol, ThemedText } from '@/components/common';
 import type { IconSymbolName } from '@/components/common';
 import { useAuth } from '@/features/auth/context/auth-context';
-import { useUser } from '@/features/user/context/user-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
-import { clearDatabase } from '@/lib/db/migrations';
+import { useFactoryReset } from '@/features/auth/hooks/use-factory-reset';
+import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
 import { SecurityService } from '@/features/auth/services/security-service';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
 import React, { memo, useEffect, useState } from 'react';
 import { Alert, Pressable, SafeAreaView, Text, View } from 'react-native';
 import Animated, {
@@ -53,16 +52,16 @@ const PinDot = memo(({ active, error, shakeStyle, themeColors }: { active: boole
         borderColor: error ? errorColor : active ? primaryColor : borderColor,
     }));
 
-    return <Animated.View style={[shakeStyle, animatedStyle]} className="w-4 h-4 rounded-full mx-4 border-2" />;
+    // Size/shape in style: NativeWind className isn't reliably applied to Reanimated views.
+    return <Animated.View style={[{ width: 16, height: 16, borderRadius: 8, marginHorizontal: 16, borderWidth: 2 }, shakeStyle, animatedStyle]} />;
 });
 PinDot.displayName = 'PinDot';
 
 export default function SecuritySetupScreen() {
     const { mode } = useLocalSearchParams<{ mode: 'set' | 'remove' | 'reset' }>();
     const { recheckSecurity } = useAuth();
-    const { updateProfile } = useUser();
+    const factoryReset = useFactoryReset();
     const colors = useThemeColors();
-    const db = useSQLiteContext();
     const [pin, setPin] = useState('');
     const [confirmPin, setConfirmPin] = useState('');
     const [step, setStep] = useState<'enter' | 'confirm' | 'verify'>(mode === 'remove' || mode === 'reset' ? 'verify' : 'enter');
@@ -88,9 +87,16 @@ export default function SecuritySetupScreen() {
             if (newPin.length === 4) {
                 setIsProcessing(true);
                 // Mini delay for visual feedback of the last dot
-                setTimeout(() => {
-                    processStep(newPin);
-                    setIsProcessing(false);
+                setTimeout(async () => {
+                    try {
+                        await processStep(newPin);
+                    } catch (e) {
+                        logger.error('Security setup step failed', e);
+                        setPin('');
+                        toast.error('Something went wrong', 'Please try again');
+                    } finally {
+                        setIsProcessing(false);
+                    }
                 }, 150);
             }
         }
@@ -116,6 +122,15 @@ export default function SecuritySetupScreen() {
                 setTimeout(() => setStep('enter'), 2000);
             }
         } else if (step === 'verify') {
+            const lockout = await SecurityService.isLockedOut();
+            if (lockout.locked) {
+                setError(true);
+                triggerShake();
+                setPin('');
+                const minutes = Math.ceil(lockout.remainingMs / 60000);
+                toast.error('Too many attempts', `Try again in ${minutes} minute${minutes === 1 ? '' : 's'}`);
+                return;
+            }
             const isValid = await SecurityService.verifyPin(enteredPin);
             if (isValid) {
                 if (mode === 'reset') {
@@ -129,10 +144,14 @@ export default function SecuritySetupScreen() {
                                 text: "Wipe Everything",
                                 style: "destructive",
                                 onPress: async () => {
-                                    await clearDatabase(db);
-                                    await SecurityService.clearSecurity();
-                                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                                    await updateProfile({ name: '', avatar: null, currency: 'USD', isOnboarded: false });
+                                    try {
+                                        await factoryReset();
+                                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                        router.replace('/onboarding');
+                                    } catch (e) {
+                                        logger.error('Factory reset failed', e);
+                                        Alert.alert('Reset failed', 'Something went wrong while resetting. Please try again.');
+                                    }
                                 }
                             }
                         ]
@@ -171,14 +190,14 @@ export default function SecuritySetupScreen() {
             <View className="flex-1 items-center justify-center px-10">
                 <Animated.View
                     entering={FadeInUp.duration(800).springify().damping(15)}
-                    className="w-16 h-16 bg-brand-primary/10 rounded-2xl items-center justify-center mb-6"
+                    className="w-16 h-16 rounded-full items-center justify-center mb-6 border border-divider dark:border-dark-divider"
                 >
                     <IconSymbol name={iconName} color={colors.primary} size={28} />
                 </Animated.View>
 
-                <Animated.View entering={FadeIn.delay(200).duration(800)} className="items-center mb-10">
-                    <ThemedText type="title" className="text-2xl mb-2 text-textPrimary dark:text-dark-textPrimary">{title}</ThemedText>
-                    <ThemedText className="opacity-40 text-center text-textSecondary dark:text-dark-textSecondary">{subtitle}</ThemedText>
+                <Animated.View entering={FadeIn.delay(200).duration(800)} style={{ alignItems: 'center', marginBottom: 40 }}>
+                    <ThemedText type="headline" className="text-[26px] leading-8 mb-2 text-center" accessibilityRole="header">{title}</ThemedText>
+                    <ThemedText className="text-center text-[15px] leading-6 text-textSecondary dark:text-dark-textSecondary">{subtitle}</ThemedText>
                 </Animated.View>
 
                 <View style={{ flexDirection: 'row', marginBottom: 60 }}>
@@ -196,15 +215,17 @@ export default function SecuritySetupScreen() {
                     <Animated.View entering={FadeInDown.delay(300).duration(400)}>
                         <Pressable
                             onPress={handleBackspace}
-                            className="w-20 h-20 items-center justify-center m-2 active:opacity-60 bg-surface dark:bg-dark-surface rounded-full border border-borderSoft dark:border-dark-borderSoft shadow-sm"
+                            className="w-20 h-20 items-center justify-center m-2 active:opacity-60 bg-surface dark:bg-dark-surface rounded-full border border-borderSoft dark:border-dark-borderSoft"
+                            accessibilityRole="button"
+                            accessibilityLabel="Delete last digit"
                         >
-                            <IconSymbol name="delete.left.fill" color={colors.error} size={28} />
+                            <IconSymbol name="delete.left.fill" color={colors.textSecondary} size={26} />
                         </Pressable>
                     </Animated.View>
                 </View>
 
-                <Pressable onPress={() => router.back()} className="mt-12 py-3 px-8 rounded-full border border-borderSoft dark:border-dark-borderSoft active:bg-surface dark:active:bg-dark-surface">
-                    <ThemedText className="text-textSecondary dark:text-dark-textSecondary font-medium">Cancel Setup</ThemedText>
+                <Pressable onPress={() => router.back()} accessibilityRole="button" className="mt-12 min-h-[44px] justify-center px-8 rounded-full border border-borderSoft dark:border-dark-borderSoft active:bg-surface dark:active:bg-dark-surface">
+                    <ThemedText type="label" className="text-textSecondary dark:text-dark-textSecondary">Cancel</ThemedText>
                 </Pressable>
             </View>
         </SafeAreaView>

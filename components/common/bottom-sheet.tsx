@@ -1,10 +1,15 @@
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { MAX_CONTENT_WIDTH } from '@/hooks/use-content-width';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle } from 'react';
-import { Dimensions, Modal, StyleSheet, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Animated, { Easing, useAnimatedKeyboard, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const SCREEN_H = Dimensions.get('window').height;
+/** Resolve a '90%' / px maxHeight against the window height. */
+function toPixels(maxHeight: `${number}%` | number, windowHeight: number): number {
+    return typeof maxHeight === 'number' ? maxHeight : (parseFloat(maxHeight) / 100) * windowHeight;
+}
 
 export interface BottomSheetRef {
     dismiss: (onDone?: () => void) => void;
@@ -44,28 +49,37 @@ export const BottomSheet = forwardRef<BottomSheetRef, BottomSheetProps>(
         ref
     ) {
         const colors = useThemeColors();
-        const sheetY = useSharedValue(SCREEN_H);
+        // Read on every render so rotation / split-screen resizes are respected.
+        const { height: windowHeight } = useWindowDimensions();
+        const { top: topInset } = useSafeAreaInsets();
+        const maxHeightPx = toPixels(maxHeight, windowHeight);
+        const sheetY = useSharedValue(windowHeight);
         const backdropOpacity = useSharedValue(0);
         const keyboard = useAnimatedKeyboard();
         const sheetStyle = useAnimatedStyle(() => {
             const keyboardLift = keyboardAvoiding ? keyboard.height.value : 0;
-            return { transform: [{ translateY: sheetY.value - keyboardLift }] };
+            // Shrink while the keyboard is up so the sheet's header (and close
+            // button) is never pushed above the top of the screen.
+            const available = windowHeight - keyboardLift - topInset;
+            return {
+                transform: [{ translateY: sheetY.value - keyboardLift }],
+                maxHeight: Math.min(maxHeightPx, available),
+            };
         });
         const backdropStyle = useAnimatedStyle(() => ({ opacity: backdropOpacity.value }));
 
         const resolvedBg = backgroundColor ?? colors.surface;
-        const resolvedGradient = gradientColors ?? ([`${colors.primary}33`, `${colors.primary}12`, 'transparent'] as const);
 
         const dismiss = useCallback((onDone?: () => void) => {
-            sheetY.value = withTiming(SCREEN_H, { duration: 300, easing: Easing.in(Easing.cubic) });
+            sheetY.value = withTiming(windowHeight, { duration: 300, easing: Easing.in(Easing.cubic) });
             backdropOpacity.value = withTiming(0, { duration: 280 });
             setTimeout(() => {
-                sheetY.value = SCREEN_H;
+                sheetY.value = windowHeight;
                 if (onDone) { onDone(); } else { onClose(); }
             }, 320);
         // sheetY and backdropOpacity are stable Reanimated refs
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        }, [onClose]);
+        }, [onClose, windowHeight]);
 
         useImperativeHandle(ref, () => ({ dismiss }), [dismiss]);
 
@@ -83,35 +97,37 @@ export const BottomSheet = forwardRef<BottomSheetRef, BottomSheetProps>(
                 style={[
                     sheetStyle,
                     {
+                        // Same reading column as the app on tablets / landscape.
+                        width: '100%',
+                        maxWidth: MAX_CONTENT_WIDTH,
+                        alignSelf: 'center',
                         backgroundColor: resolvedBg,
                         borderTopLeftRadius: borderTopRadius,
                         borderTopRightRadius: borderTopRadius,
                         paddingHorizontal,
                         paddingTop,
                         paddingBottom,
-                        maxHeight,
                         overflow: 'hidden',
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: -4 },
-                        shadowOpacity: 0.15,
-                        shadowRadius: 20,
-                        elevation: 24,
+                        borderTopWidth: 1,
+                        borderColor: colors.divider,
                     },
                 ]}
             >
-                <LinearGradient
-                    colors={resolvedGradient}
-                    style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 160 }}
-                />
+                {!!gradientColors && (
+                    <LinearGradient
+                        colors={gradientColors}
+                        style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 160 }}
+                    />
+                )}
                 {showHandle && (
                     <View
                         style={{
-                            width: 48,
-                            height: 6,
+                            width: 36,
+                            height: 4,
                             backgroundColor: colors.borderStrong,
-                            borderRadius: 3,
+                            borderRadius: 2,
                             alignSelf: 'center',
-                            marginBottom: 32,
+                            marginBottom: 20,
                         }}
                     />
                 )}
@@ -123,9 +139,17 @@ export const BottomSheet = forwardRef<BottomSheetRef, BottomSheetProps>(
             <Modal visible={visible} animationType="none" transparent statusBarTranslucent onRequestClose={() => dismiss()}>
                 <View style={StyleSheet.absoluteFillObject}>
                     <Animated.View
-                        style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)' }, backdropStyle]}
-                    />
-                    <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+                        style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.overlay }, backdropStyle]}
+                    >
+                        <Pressable
+                            style={StyleSheet.absoluteFillObject}
+                            onPress={() => dismiss()}
+                            accessibilityRole="button"
+                            accessibilityLabel="Close"
+                        />
+                    </Animated.View>
+                    {/* box-none: taps outside the sheet reach the backdrop (closes it) */}
+                    <View style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">
                         {sheet}
                     </View>
                 </View>

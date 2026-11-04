@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Finara",
+    "name": "Folio",
     "slug": "Finara",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -14,7 +14,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#FFFFFF",
+        "backgroundColor": "#0D5C63",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
@@ -32,7 +32,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/notification-icon.png",
-          "color": "#246BFD"
+          "color": "#0D5C63"
         }
       ],
       [
@@ -41,10 +41,10 @@
           "image": "./assets/images/android-icon-foreground.png",
           "imageWidth": 180,
           "resizeMode": "contain",
-          "backgroundColor": "#246BFD",
+          "backgroundColor": "#0D5C63",
           "dark": {
             "image": "./assets/images/android-icon-foreground.png",
-            "backgroundColor": "#1E56D8"
+            "backgroundColor": "#0A474D"
           }
         }
       ],

@@ -4,8 +4,11 @@ import * as Haptics from 'expo-haptics';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useThemeColors } from '@/hooks/use-theme-colors';
+import { fonts } from '@/theme/typography';
+
+/** Height of the tab bar above the bottom safe-area inset. The FAB positions itself from this. */
+export const TAB_BAR_HEIGHT = 58;
 
 type IconName = 'overview' | 'activity' | 'budget' | 'savings' | 'insights';
 
@@ -56,7 +59,7 @@ function TabIcon({ name, color }: { name: IconName; color: string }) {
           d={d}
           fill="none"
           stroke={color}
-          strokeWidth={2}
+          strokeWidth={1.75}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -66,16 +69,15 @@ function TabIcon({ name, color }: { name: IconName; color: string }) {
 }
 
 export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
-  const colorScheme = useColorScheme();
-  const theme = Colors[colorScheme ?? 'light'];
+  const theme = useThemeColors();
   const insets = useSafeAreaInsets();
   const bottomInset = Math.max(insets.bottom, 8);
 
   const containerStyle = [
     styles.container,
     {
-      backgroundColor: theme.surface || theme.background,
-      borderTopColor: theme.borderSoft || 'rgba(0,0,0,0.06)',
+      backgroundColor: theme.background,
+      borderTopColor: theme.divider,
       paddingBottom: bottomInset,
     },
   ];
@@ -87,7 +89,7 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
         if (!config) return null;
 
         const isFocused = state.index === index;
-        const color = isFocused ? theme.tint : theme.tabIconDefault;
+        const color = isFocused ? theme.textPrimary : theme.textMuted;
         const { options } = descriptors[route.key];
 
         const onPress = () => {
@@ -111,17 +113,17 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
         return (
           <Pressable
             key={route.key}
-            accessibilityRole="button"
-            accessibilityState={isFocused ? { selected: true } : {}}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: isFocused }}
             accessibilityLabel={options.tabBarAccessibilityLabel ?? config.label}
             testID={options.tabBarButtonTestID}
             onPress={onPress}
             onLongPress={onLongPress}
-            android_ripple={{ color: 'rgba(36,107,253,0.12)', borderless: true }}
+            android_ripple={{ color: theme.btnGhostBgPressed, borderless: true }}
             style={styles.tab}
           >
             {isFocused && (
-              <View style={[styles.indicator, { backgroundColor: theme.tint }]} />
+              <View style={[styles.indicator, { backgroundColor: theme.primary }]} />
             )}
             <View style={styles.iconWrapper}>
               <TabIcon name={config.icon} color={color} />
@@ -131,7 +133,7 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
                 styles.label,
                 {
                   color,
-                  fontWeight: isFocused ? '700' : '500',
+                  fontFamily: isFocused ? fonts.sansBold : fonts.sansMedium,
                 },
               ]}
               numberOfLines={1}
@@ -151,19 +153,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     width: '100%',
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 10,
-    elevation: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
   },
   tab: {
     flex: 1,
     flexBasis: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 6,
+    height: TAB_BAR_HEIGHT,
     paddingHorizontal: 2,
     position: 'relative',
   },
@@ -176,15 +172,14 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 11,
     marginTop: 4,
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
     textAlign: 'center',
     width: '100%',
   },
   indicator: {
     position: 'absolute',
-    bottom: 0,
-    width: 28,
-    height: 3,
-    borderRadius: 2,
+    top: 0,
+    width: 24,
+    height: 2,
   },
 });

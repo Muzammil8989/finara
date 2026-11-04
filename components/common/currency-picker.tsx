@@ -5,16 +5,9 @@ import { shadows } from '@/theme/shadows';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import React, { useMemo, useState } from 'react';
-import {
-  Keyboard,
-  Modal,
-  Pressable,
-  ScrollView,
-  TextInput,
-  View,
-} from 'react-native';
+import { Keyboard, Modal, ScrollView, TextInput, View } from 'react-native';
+import { Pressable } from './pressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
@@ -32,6 +25,8 @@ import { ThemedText } from './themed-text';
 interface CurrencyPickerProps {
   value: string;
   onSelect: (code: string) => void;
+  /** 'card' = standalone field (onboarding); 'row' = a row inside a settings group. */
+  variant?: 'card' | 'row';
 }
 
 const POPULAR_LIST = ['USD', 'EUR', 'GBP', 'PKR', 'INR', 'JPY', 'CNY', 'CAD', 'AUD', 'AED'];
@@ -39,7 +34,7 @@ const POPULAR_LIST = ['USD', 'EUR', 'GBP', 'PKR', 'INR', 'JPY', 'CNY', 'CAD', 'A
 // M3 state layer: scale feedback for primary interactive element
 const PRESSED_SCALE = 0.97;
 
-export function CurrencyPicker({ value, onSelect }: CurrencyPickerProps) {
+export function CurrencyPicker({ value, onSelect, variant = 'card' }: CurrencyPickerProps) {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const [isVisible, setIsVisible] = useState(false);
@@ -107,58 +102,66 @@ export function CurrencyPicker({ value, onSelect }: CurrencyPickerProps) {
           onPressOut={() => { triggerScale.value = withTiming(1, { duration: 150 }); }}
           accessibilityRole="button"
           accessibilityLabel={`Selected currency: ${selectedCurrency.code}, ${selectedCurrency.name}`}
-          className="w-full bg-backgroundAlt dark:bg-dark-backgroundAlt rounded-3xl px-5 py-4 flex-row items-center justify-between"
+          className={variant === 'row'
+            ? 'w-full px-4 min-h-[60px] py-3 flex-row items-center'
+            : 'w-full rounded-xl px-4 py-3.5 flex-row items-center border border-borderStrong dark:border-dark-borderStrong bg-surface dark:bg-dark-surface'}
         >
-          <View className="flex-row items-center gap-3">
-            <FlagIcon code={selectedCurrency.flag} size={28} />
-            <View>
-              <ThemedText type="defaultSemiBold" className="leading-tight">
-                {selectedCurrency.code} — {selectedCurrency.symbol}
+          {variant === 'row' ? (
+            <>
+              <View className="w-7 mr-3 items-center">
+                <Ionicons name="cash-outline" size={20} color={colors.textSecondary} />
+              </View>
+              <View className="flex-1 mr-3">
+                <ThemedText type="defaultSemiBold" className="text-[15px] leading-5">Currency</ThemedText>
+                <ThemedText type="caption" className="mt-0.5" numberOfLines={1}>{selectedCurrency.name}</ThemedText>
+              </View>
+              <FlagIcon code={selectedCurrency.flag} size={20} />
+              <ThemedText type="label" className="ml-2 mr-1" style={{ color: colors.textSecondary }}>
+                {selectedCurrency.code}
               </ThemedText>
-              {/* style color wins over ThemedText inline — textMuted correctly applied */}
-              <ThemedText className="text-xs" style={{ color: colors.textMuted }}>
-                {selectedCurrency.name}
-              </ThemedText>
-            </View>
-          </View>
-          <Ionicons name="chevron-expand-outline" color={colors.textMuted} size={20} />
+              <Ionicons name="chevron-forward" color={colors.textMuted} size={18} />
+            </>
+          ) : (
+            <>
+              <FlagIcon code={selectedCurrency.flag} size={28} />
+              <View className="flex-1 ml-3">
+                <ThemedText type="defaultSemiBold" className="leading-tight">
+                  {selectedCurrency.code} — {selectedCurrency.symbol}
+                </ThemedText>
+                <ThemedText type="caption">{selectedCurrency.name}</ThemedText>
+              </View>
+              <Ionicons name="chevron-expand-outline" color={colors.textMuted} size={20} />
+            </>
+          )}
         </Pressable>
       </Animated.View>
 
       <Modal visible={isVisible} animationType="none" transparent onRequestClose={closeModal}>
-        <Animated.View style={[{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }, backdropStyle]}>
+        <Animated.View style={[{ flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' }, backdropStyle]}>
           <Pressable style={{ flex: 1 }} onPress={closeModal} />
           <Animated.View
             style={[sheetStyle, { ...shadows.lg, shadowColor: colors.black, shadowOffset: { width: 0, height: -4 }, elevation: 16, paddingBottom: insets.bottom + 24 }]}
-            className="bg-surface dark:bg-dark-surface rounded-t-3xl px-6 pt-10 overflow-hidden max-h-[88%]"
+            className="bg-surface dark:bg-dark-surface rounded-t-3xl px-6 pt-4 overflow-hidden max-h-[88%]"
           >
-            {/* ${colors.primary} replaces hardcoded rgba hex */}
-            <LinearGradient
-              colors={[`${colors.primary}26`, `${colors.primary}0D`, 'transparent']}
-              className="absolute top-0 left-0 right-0 h-[25%]"
-            />
 
             {/* Drag handle — M3 spec: 32dp wide, 4dp tall */}
-            <View className="w-12 h-1.5 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-8" />
+            <View className="w-9 h-1 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-5" />
 
             {/* Header */}
             <View className="flex-row justify-between items-center mb-6">
               <View className="flex-row items-center gap-3">
-                <Ionicons name="globe-outline" size={22} color={colors.primary} />
-                {/* font-bold = typography.fontWeights.bold (was font-black, outside token) */}
-                <ThemedText className="text-xl font-bold">Select Currency</ThemedText>
+                <ThemedText type="headline">Choose currency</ThemedText>
               </View>
               <Pressable
                 onPress={closeModal}
                 accessibilityRole="button"
                 accessibilityLabel="Close currency picker"
                 style={({ pressed }) => [{
-                  backgroundColor: `${colors.error}12`,
-                  borderRadius: borderRadius.lg,   // 12px token ✅
-                  padding: spacing.sm,              // 8px token (was raw 8)
-                }, pressed && { opacity: 0.7 }]}
+                  width: 40, height: 40, borderRadius: 20,
+                  alignItems: 'center', justifyContent: 'center',
+                }, pressed && { backgroundColor: colors.backgroundAlt }]}
               >
-                <Ionicons name="close" color={colors.error} size={20} />
+                <Ionicons name="close" color={colors.textSecondary} size={22} />
               </Pressable>
             </View>
 
@@ -197,7 +200,7 @@ export function CurrencyPicker({ value, onSelect }: CurrencyPickerProps) {
 
             {/* Tabs — M3 Segmented Button pattern */}
             <View
-              className="flex-row p-1 rounded-2xl mb-5"
+              className="flex-row p-1 rounded-xl mb-5"
               style={{ backgroundColor: colors.backgroundAlt }}
             >
               {(['popular', 'all'] as const).map((tab) => (
@@ -240,7 +243,7 @@ export function CurrencyPicker({ value, onSelect }: CurrencyPickerProps) {
             >
               {/* text-xs = typography.fontSizes.xs (12px); font-semibold within token scale */}
               <ThemedText
-                className="text-xs font-semibold uppercase"
+                type="kicker"
                 style={{ color: colors.textMuted }}
               >
                 {filteredCurrencies.length} {activeTab === 'popular' ? 'popular' : ''} currencies
@@ -277,7 +280,7 @@ export function CurrencyPicker({ value, onSelect }: CurrencyPickerProps) {
                         accessibilityRole="button"
                         accessibilityState={{ selected: isSelected }}
                         accessibilityLabel={`${item.name}, ${item.code}, ${item.symbol}`}
-                        className="flex-row items-center justify-between p-3.5 rounded-2xl mb-2"
+                        className="flex-row items-center justify-between p-3.5 rounded-xl mb-2"
                         style={({ pressed }) => [
                           isSelected
                             // borderWidth 1 replaces 1.5 (non-integer)

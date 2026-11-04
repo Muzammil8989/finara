@@ -1,6 +1,5 @@
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
 import { DimensionValue, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -109,10 +108,6 @@ export function CalendarPicker({
                 exiting={FadeOutDown.duration(200)}
                 style={[styles.container, { backgroundColor: colors.surface, paddingBottom: insets.bottom + 24 }]}
             >
-            <LinearGradient
-                colors={[`${colors.primary}25`, `${colors.primary}08`, 'transparent']}
-                style={styles.gradient}
-            />
 
             {/* Handle */}
             <View style={{ width: 48, height: 6, borderRadius: 3, backgroundColor: colors.borderStrong, alignSelf: 'center', marginBottom: 20 }} />
@@ -123,7 +118,7 @@ export function CalendarPicker({
                     Select Date
                 </ThemedText>
                 <Pressable onPress={onClose} style={styles.closeButton}>
-                    <Ionicons name="close" size={24} color={colors.error} />
+                    <Ionicons name="close" size={24} color={colors.expense} />
                 </Pressable>
             </View>
 
@@ -231,8 +226,8 @@ const styles = StyleSheet.create({
         bottom: 0,
         left: 0,
         right: 0,
-        borderTopLeftRadius: 32,
-        borderTopRightRadius: 32,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
         paddingHorizontal: 24,
         paddingTop: 24,
         paddingBottom: 40,
@@ -249,8 +244,8 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         height: 120,
-        borderTopLeftRadius: 32,
-        borderTopRightRadius: 32,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
     },
     header: {
         flexDirection: 'row',

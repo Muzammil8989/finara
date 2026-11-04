@@ -6,12 +6,12 @@
  */
 
 export { lightColors, darkColors } from './colors';
-export type { AppColorTheme } from './colors';
+export type { AppColorTheme, ColorScheme } from './colors';
 
 export { spacing } from './spacing';
 export type { Spacing } from './spacing';
 
-export { typography } from './typography';
+export { fonts, tabularNums, typography } from './typography';
 export type { Typography } from './typography';
 
 export { shadows } from './shadows';

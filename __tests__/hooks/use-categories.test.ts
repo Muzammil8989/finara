@@ -1,5 +1,5 @@
 import { renderHook, act, waitFor } from '@testing-library/react-native';
-import { useCategories } from '@/hooks/use-categories';
+import { useCategories } from '@/features/categories/hooks/use-categories';
 
 jest.mock('@/lib/db/db-client', () => ({
     getDb: jest.fn(),

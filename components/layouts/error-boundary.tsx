@@ -13,14 +13,16 @@
  *   body         → text-textMuted / dark:text-dark-textMuted
  *   CTA bg       → bg-primary                               (M3 primary)
  *   CTA text     → text-white                               (M3 on-primary)
- *   CTA shape    → rounded-2xl = Shape.Large (16dp)
+ *   CTA shape    → rounded-xl = Shape.Large (16dp)
  */
 
 import React, { Component, ErrorInfo } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ThemedText } from '@/components/common';
+import { AppButton, ThemedText } from '@/components/common';
 import { logger } from '@/lib/logger';
+
+const firstLines = (text: string, n = 12) => text.split('\n').slice(0, n).join('\n');
 
 // ─── ErrorFallback ────────────────────────────────────────────────────────────
 // Functional component — can use NativeWind + ThemedText for full token coverage
@@ -38,68 +40,34 @@ function ErrorFallback({ onReset, error, componentStack }: ErrorFallbackProps) {
 
   return (
     <SafeAreaView className="flex-1 bg-background dark:bg-dark-background">
-      <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 16 }}>
-        <View className="items-center mt-8 mb-4">
-          <View className="w-16 h-16 rounded-2xl bg-errorBg dark:bg-dark-errorBg items-center justify-center mb-4">
-            <ThemedText className="text-3xl text-errorText dark:text-dark-errorText">
-              !
-            </ThemedText>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingVertical: 24, justifyContent: 'center' }}>
+        <ThemedText type="kicker" className="mb-1.5">Something went wrong</ThemedText>
+        <ThemedText type="display" className="mb-3" accessibilityRole="header">Folio hit a snag</ThemedText>
+        <ThemedText className="text-[15px] leading-6 mb-6 text-textSecondary dark:text-dark-textSecondary">
+          Your data is safe on this phone. Try again, and if this keeps happening, restart the app.
+        </ThemedText>
+
+        {/* Technical details only in development builds */}
+        {__DEV__ && (
+          <View className="mb-6 border-t border-divider dark:border-dark-divider pt-4">
+            <ThemedText type="kicker" className="mb-1">Error message</ThemedText>
+            <ThemedText className="text-sm mb-4 text-errorText dark:text-dark-errorText" selectable>{message}</ThemedText>
+            {stack ? (
+              <>
+                <ThemedText type="kicker" className="mb-1">Stack trace</ThemedText>
+                <ThemedText className="text-xs mb-4" selectable>{firstLines(stack)}</ThemedText>
+              </>
+            ) : null}
+            {componentStack ? (
+              <>
+                <ThemedText type="kicker" className="mb-1">Component stack</ThemedText>
+                <ThemedText className="text-xs" selectable>{firstLines(componentStack)}</ThemedText>
+              </>
+            ) : null}
           </View>
-          <ThemedText
-            type="subtitle"
-            className="text-center text-textPrimary dark:text-dark-textPrimary mb-2"
-          >
-            Something went wrong
-          </ThemedText>
-        </View>
+        )}
 
-        <View className="bg-errorBg dark:bg-dark-errorBg rounded-2xl p-4 mb-4">
-          <ThemedText className="text-xs font-bold text-errorText dark:text-dark-errorText mb-1">
-            ERROR MESSAGE
-          </ThemedText>
-          <ThemedText className="text-sm text-errorText dark:text-dark-errorText" selectable>
-            {message}
-          </ThemedText>
-        </View>
-
-        {stack ? (
-          <View className="bg-surface dark:bg-dark-surface rounded-2xl p-4 mb-4">
-            <ThemedText className="text-xs font-bold text-textMuted dark:text-dark-textMuted mb-1">
-              STACK TRACE
-            </ThemedText>
-            <ThemedText
-              className="text-xs text-textPrimary dark:text-dark-textPrimary"
-              selectable
-            >
-              {stack.split('\n').slice(0, 12).join('\n')}
-            </ThemedText>
-          </View>
-        ) : null}
-
-        {componentStack ? (
-          <View className="bg-surface dark:bg-dark-surface rounded-2xl p-4 mb-4">
-            <ThemedText className="text-xs font-bold text-textMuted dark:text-dark-textMuted mb-1">
-              COMPONENT STACK
-            </ThemedText>
-            <ThemedText
-              className="text-xs text-textPrimary dark:text-dark-textPrimary"
-              selectable
-            >
-              {componentStack.split('\n').slice(0, 12).join('\n')}
-            </ThemedText>
-          </View>
-        ) : null}
-
-        <Pressable
-          onPress={onReset}
-          className="bg-primary px-8 py-3.5 rounded-2xl items-center mt-2"
-          accessibilityRole="button"
-          accessibilityLabel="Try again"
-        >
-          <ThemedText className="text-white font-bold text-base">
-            Try Again
-          </ThemedText>
-        </Pressable>
+        <AppButton label="Try again" icon="refresh" onPress={onReset} />
       </ScrollView>
     </SafeAreaView>
   );

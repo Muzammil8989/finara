@@ -1,4 +1,4 @@
-import { AppButton, EmptyState, ScreenHeader, ThemedText } from '@/components/common';
+import { AppButton, EmptyState, ScreenHeader, SegmentedControl, ThemedText } from '@/components/common';
 import { CategoryChips } from '@/features/transactions/components/category-chips';
 import { useAccounts } from '@/features/accounts/hooks/use-accounts';
 import { useCategories } from '@/features/categories/hooks/use-categories';
@@ -10,15 +10,15 @@ import {
     getRecurringExpensesWithDetails,
     updateRecurringExpense,
 } from '@/lib/db/queries';
-import { formatWithCommas, numberToWords } from '@/lib/utils/currency';
+import { formatWithCommas, numberToWords, parseAmount } from '@/lib/utils/currency';
+import { todayString } from '@/lib/utils/date';
+import { processRecurringTransactions, resumeRecurring } from '@/features/recurring/services/recurring-processor';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
 import { UserService } from '@/features/user/services/user-service';
-import { useModals } from '@/context/modal-context';
+import { useModals } from '@/providers/modal-context';
 import { IoniconsName } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -81,31 +81,24 @@ function DeleteConfirmSheet({
                     exiting={FadeOutDown.duration(200).easing(Easing.in(Easing.cubic))}
                     style={{
                         backgroundColor: colors.surface,
-                        borderTopLeftRadius: 40,
-                        borderTopRightRadius: 40,
-                        paddingHorizontal: 28,
-                        paddingTop: 36,
+                        borderTopLeftRadius: 24,
+                        borderTopRightRadius: 24,
+                        paddingHorizontal: 24,
+                        paddingTop: 16,
                         paddingBottom: insets.bottom + 32,
                         overflow: 'hidden',
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: -4 },
-                        shadowOpacity: 0.15,
-                        shadowRadius: 20,
-                        elevation: 24,
+                        borderTopWidth: 1,
+                        borderColor: colors.divider,
                     }}
                 >
-                    <LinearGradient
-                        colors={[`${colors.error}18`, `${colors.error}08`, 'transparent']}
-                        className="absolute top-0 left-0 right-0 h-40"
-                    />
-                    <View className="w-12 h-1.5 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-8" />
+                    <View className="w-9 h-1 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-5" />
                     <View className="w-16 h-16 items-center justify-center mx-auto mb-5">
-                        <Ionicons name="trash-outline" size={32} color={colors.error} />
+                        <Ionicons name="trash-outline" size={32} color={colors.expense} />
                     </View>
-                    <ThemedText className="text-xl font-bold text-center mb-2">
+                    <ThemedText type="headline" className="text-center mb-2" accessibilityRole="header">
                         Delete Recurring
                     </ThemedText>
-                    <ThemedText className="text-sm text-center text-textMuted dark:text-dark-textMuted leading-6 mb-8 px-4">
+                    <ThemedText className="text-[15px] text-center text-textSecondary dark:text-dark-textSecondary leading-6 mb-7 px-2">
                         Delete{' '}
                         <ThemedText className="font-bold text-textPrimary dark:text-dark-textPrimary">
                             {item.categoryName}
@@ -145,31 +138,24 @@ function ToggleConfirmSheet({
                     exiting={FadeOutDown.duration(200).easing(Easing.in(Easing.cubic))}
                     style={{
                         backgroundColor: colors.surface,
-                        borderTopLeftRadius: 40,
-                        borderTopRightRadius: 40,
-                        paddingHorizontal: 28,
-                        paddingTop: 36,
+                        borderTopLeftRadius: 24,
+                        borderTopRightRadius: 24,
+                        paddingHorizontal: 24,
+                        paddingTop: 16,
                         paddingBottom: insets.bottom + 32,
                         overflow: 'hidden',
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: -4 },
-                        shadowOpacity: 0.15,
-                        shadowRadius: 20,
-                        elevation: 24,
+                        borderTopWidth: 1,
+                        borderColor: colors.divider,
                     }}
                 >
-                    <LinearGradient
-                        colors={[`${actionColor}20`, `${actionColor}08`, 'transparent']}
-                        className="absolute top-0 left-0 right-0 h-40"
-                    />
-                    <View className="w-12 h-1.5 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-8" />
+                    <View className="w-9 h-1 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-5" />
                     <View className="w-16 h-16 items-center justify-center mx-auto mb-5">
                         <Ionicons name={isPaused ? 'play' : 'pause'} size={32} color={actionColor} />
                     </View>
-                    <ThemedText className="text-xl font-bold text-center mb-2">
+                    <ThemedText type="headline" className="text-center mb-2" accessibilityRole="header">
                         {isPaused ? 'Resume' : 'Pause'} Recurring
                     </ThemedText>
-                    <ThemedText className="text-sm text-center text-textMuted dark:text-dark-textMuted leading-6 mb-8 px-4">
+                    <ThemedText className="text-[15px] text-center text-textSecondary dark:text-dark-textSecondary leading-6 mb-7 px-2">
                         {isPaused ? 'Resume' : 'Pause'}{' '}
                         <ThemedText className="font-bold text-textPrimary dark:text-dark-textPrimary">
                             {item.categoryName}
@@ -261,7 +247,7 @@ export default function RecurringScreen() {
     };
 
     const handleAdd = async () => {
-        const parsedAmount = parseFloat(addAmount);
+        const parsedAmount = parseAmount(addAmount);
         if (!addAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
             toast.error('Please enter a valid amount');
             return;
@@ -282,10 +268,12 @@ export default function RecurringScreen() {
                 frequency: addFrequency,
                 category_id: addCategoryId,
                 account_id: addAccountId,
-                start_date: new Date().toISOString().split('T')[0],
-                notes: addNotes.trim() || undefined,
+                start_date: todayString(),
+                notes: addNotes.trim() || null,
                 is_active: 1,
             });
+            // Book today's occurrence now rather than on next app launch.
+            await processRecurringTransactions();
             toast.success('Recurring item added');
             setAddModalVisible(false);
             fetchItems();
@@ -309,7 +297,7 @@ export default function RecurringScreen() {
 
     const handleSave = async () => {
         if (!editItem) return;
-        const parsedAmount = parseFloat(editAmount);
+        const parsedAmount = parseAmount(editAmount);
         if (!editAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
             toast.error('Please enter a valid amount');
             return;
@@ -330,7 +318,7 @@ export default function RecurringScreen() {
                 frequency: editFrequency,
                 category_id: editCategoryId,
                 account_id: editAccountId,
-                notes: editNotes.trim() || undefined,
+                notes: editNotes.trim() || null,
             });
             toast.success('Recurring item updated');
             setEditItem(null);
@@ -353,7 +341,9 @@ export default function RecurringScreen() {
         const newActive = togglingItem.is_active === 1 ? 0 : 1;
         setIsToggling(true);
         try {
-            await updateRecurringExpense(togglingItem.id, { is_active: newActive });
+            // Resuming skips the paused periods instead of back-filling them.
+            if (newActive === 1) await resumeRecurring(togglingItem.id);
+            else await updateRecurringExpense(togglingItem.id, { is_active: 0 });
             toast.success(`Recurring item ${newActive === 1 ? 'resumed' : 'paused'}`);
             setTogglingItem(null);
             fetchItems();
@@ -403,26 +393,22 @@ export default function RecurringScreen() {
                         entering={FadeInDown.duration(350)}
                         style={{
                             backgroundColor: colors.surface,
-                            borderTopLeftRadius: 40,
-                            borderTopRightRadius: 40,
-                            paddingHorizontal: 32,
-                            paddingTop: 40,
+                            borderTopLeftRadius: 24,
+                            borderTopRightRadius: 24,
+                            paddingHorizontal: 24,
+                            paddingTop: 16,
                             paddingBottom: insets.bottom + 40,
                             maxHeight: '90%',
                             overflow: 'hidden',
                         }}
                     >
-                        <LinearGradient
-                            colors={[`${colors.primary}1A`, `${colors.primary}08`, 'transparent']}
-                            className="absolute top-0 left-0 right-0 h-[35%]"
-                        />
                         <View className="flex-row justify-between items-center mb-8">
                             <View className="flex-row items-center gap-3">
                                 <Ionicons name="repeat" size={22} color={isIncome ? colors.success : colors.error} />
                                 <ThemedText className="text-xl font-bold">Edit Recurring</ThemedText>
                             </View>
                             <Pressable onPress={() => setEditItem(null)} className="p-2">
-                                <Ionicons name="close" size={24} color={colors.error} />
+                                <Ionicons name="close" size={24} color={colors.expense} />
                             </Pressable>
                         </View>
 
@@ -433,8 +419,8 @@ export default function RecurringScreen() {
                         >
                             {/* Amount */}
                             <View className="mb-6">
-                                <ThemedText className="text-[10px] font-bold uppercase mb-2" style={{ color: colors.textMuted }}>Amount</ThemedText>
-                                <View className="flex-row items-center rounded-2xl px-6 py-4" style={{ backgroundColor: colors.backgroundAlt }}>
+                                <ThemedText type="kicker" className="mb-2" style={{ color: colors.textMuted }}>Amount</ThemedText>
+                                <View className="flex-row items-center rounded-xl px-6 py-4" style={{ backgroundColor: colors.backgroundAlt }}>
                                     <ThemedText className="text-lg font-bold mr-2" style={{ color: colors.textMuted }}>{currencySymbol}</ThemedText>
                                     <TextInput
                                         value={editAmount}
@@ -446,13 +432,13 @@ export default function RecurringScreen() {
                                         style={{ color: colors.textPrimary, fontFamily: 'SpaceGrotesk_700Bold' }}
                                     />
                                 </View>
-                                {!!editAmount && !isNaN(parseFloat(editAmount)) && parseFloat(editAmount) > 0 && (
+                                {!!editAmount && !isNaN(parseAmount(editAmount)) && parseAmount(editAmount) > 0 && (
                                     <View className="items-center mt-2 gap-0.5">
                                         <ThemedText className="text-sm font-bold" style={{ color: colors.primary }}>
                                             {formatWithCommas(editAmount)}
                                         </ThemedText>
                                         <ThemedText className="text-xs font-medium" style={{ color: colors.textMuted }}>
-                                            {numberToWords(parseFloat(editAmount))}
+                                            {numberToWords(parseAmount(editAmount))}
                                         </ThemedText>
                                     </View>
                                 )}
@@ -460,7 +446,7 @@ export default function RecurringScreen() {
 
                             {/* Frequency */}
                             <View className="mb-6">
-                                <ThemedText className="text-[10px] font-bold uppercase mb-3" style={{ color: colors.textMuted }}>Frequency</ThemedText>
+                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Frequency</ThemedText>
                                 <View className="flex-row gap-2">
                                     {(['daily', 'weekly', 'monthly', 'yearly'] as const).map(freq => (
                                         <Pressable
@@ -484,7 +470,7 @@ export default function RecurringScreen() {
 
                             {/* Category */}
                             <View className="mb-6">
-                                <ThemedText className="text-[10px] font-bold uppercase mb-3" style={{ color: colors.textMuted }}>Category</ThemedText>
+                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Category</ThemedText>
                                 <CategoryChips
                                     categories={filteredCategories}
                                     selectedCategoryId={editCategoryId}
@@ -494,7 +480,7 @@ export default function RecurringScreen() {
 
                             {/* Account */}
                             <View className="mb-6">
-                                <ThemedText className="text-[10px] font-bold uppercase mb-3" style={{ color: colors.textMuted }}>Payment Method</ThemedText>
+                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Payment Method</ThemedText>
                                 <View className="flex-row flex-wrap gap-2">
                                     {(accounts || []).map(acc => {
                                         if (!acc?.id) return null;
@@ -522,7 +508,7 @@ export default function RecurringScreen() {
 
                             {/* Notes */}
                             <View className="mb-8">
-                                <ThemedText className="text-[10px] font-bold uppercase mb-2" style={{ color: colors.textMuted }}>Note</ThemedText>
+                                <ThemedText type="kicker" className="mb-2" style={{ color: colors.textMuted }}>Note</ThemedText>
                                 <TextInput
                                     value={editNotes}
                                     onChangeText={setEditNotes}
@@ -561,19 +547,15 @@ export default function RecurringScreen() {
                         entering={FadeInDown.duration(350)}
                         style={{
                             backgroundColor: colors.surface,
-                            borderTopLeftRadius: 40,
-                            borderTopRightRadius: 40,
-                            paddingHorizontal: 32,
-                            paddingTop: 40,
+                            borderTopLeftRadius: 24,
+                            borderTopRightRadius: 24,
+                            paddingHorizontal: 24,
+                            paddingTop: 16,
                             paddingBottom: insets.bottom + 40,
                             maxHeight: '90%',
                             overflow: 'hidden',
                         }}
                     >
-                        <LinearGradient
-                            colors={[`${colors.primary}1A`, `${colors.primary}08`, 'transparent']}
-                            className="absolute top-0 left-0 right-0 h-[35%]"
-                        />
                         <View className="flex-row justify-between items-center mb-8">
                             <View className="flex-row items-center gap-3">
                                 <Ionicons name="repeat" size={22} color={activeTab === 'income' ? colors.success : colors.error} />
@@ -582,7 +564,7 @@ export default function RecurringScreen() {
                                 </ThemedText>
                             </View>
                             <Pressable onPress={() => setAddModalVisible(false)} className="p-2">
-                                <Ionicons name="close" size={24} color={colors.error} />
+                                <Ionicons name="close" size={24} color={colors.expense} />
                             </Pressable>
                         </View>
 
@@ -593,8 +575,8 @@ export default function RecurringScreen() {
                         >
                             {/* Amount */}
                             <View className="mb-6">
-                                <ThemedText className="text-[10px] font-bold uppercase mb-2" style={{ color: colors.textMuted }}>Amount</ThemedText>
-                                <View className="flex-row items-center rounded-2xl px-6 py-4" style={{ backgroundColor: colors.backgroundAlt }}>
+                                <ThemedText type="kicker" className="mb-2" style={{ color: colors.textMuted }}>Amount</ThemedText>
+                                <View className="flex-row items-center rounded-xl px-6 py-4" style={{ backgroundColor: colors.backgroundAlt }}>
                                     <ThemedText className="text-lg font-bold mr-2" style={{ color: colors.textMuted }}>{currencySymbol}</ThemedText>
                                     <TextInput
                                         value={addAmount}
@@ -606,13 +588,13 @@ export default function RecurringScreen() {
                                         style={{ color: colors.textPrimary, fontFamily: 'SpaceGrotesk_700Bold' }}
                                     />
                                 </View>
-                                {!!addAmount && !isNaN(parseFloat(addAmount)) && parseFloat(addAmount) > 0 && (
+                                {!!addAmount && !isNaN(parseAmount(addAmount)) && parseAmount(addAmount) > 0 && (
                                     <View className="items-center mt-2 gap-0.5">
                                         <ThemedText className="text-sm font-bold" style={{ color: colors.primary }}>
                                             {formatWithCommas(addAmount)}
                                         </ThemedText>
                                         <ThemedText className="text-xs font-medium" style={{ color: colors.textMuted }}>
-                                            {numberToWords(parseFloat(addAmount))}
+                                            {numberToWords(parseAmount(addAmount))}
                                         </ThemedText>
                                     </View>
                                 )}
@@ -620,7 +602,7 @@ export default function RecurringScreen() {
 
                             {/* Frequency */}
                             <View className="mb-6">
-                                <ThemedText className="text-[10px] font-bold uppercase mb-3" style={{ color: colors.textMuted }}>Frequency</ThemedText>
+                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Frequency</ThemedText>
                                 <View className="flex-row gap-2">
                                     {(['daily', 'weekly', 'monthly', 'yearly'] as const).map(freq => (
                                         <Pressable
@@ -644,7 +626,7 @@ export default function RecurringScreen() {
 
                             {/* Category */}
                             <View className="mb-6">
-                                <ThemedText className="text-[10px] font-bold uppercase mb-3" style={{ color: colors.textMuted }}>Category</ThemedText>
+                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Category</ThemedText>
                                 <CategoryChips
                                     categories={addCategories}
                                     selectedCategoryId={addCategoryId}
@@ -654,7 +636,7 @@ export default function RecurringScreen() {
 
                             {/* Account */}
                             <View className="mb-6">
-                                <ThemedText className="text-[10px] font-bold uppercase mb-3" style={{ color: colors.textMuted }}>Payment Method</ThemedText>
+                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Payment Method</ThemedText>
                                 <View className="flex-row flex-wrap gap-2">
                                     {(accounts || []).map(acc => {
                                         if (!acc?.id) return null;
@@ -682,7 +664,7 @@ export default function RecurringScreen() {
 
                             {/* Notes */}
                             <View className="mb-8">
-                                <ThemedText className="text-[10px] font-bold uppercase mb-2" style={{ color: colors.textMuted }}>Note</ThemedText>
+                                <ThemedText type="kicker" className="mb-2" style={{ color: colors.textMuted }}>Note</ThemedText>
                                 <TextInput
                                     value={addNotes}
                                     onChangeText={setAddNotes}
@@ -744,18 +726,18 @@ export default function RecurringScreen() {
                         </ThemedText>
                         <View className="flex-row items-center gap-2">
                             <View className="px-2 py-0.5 rounded-md" style={{ backgroundColor: isIncome ? `${colors.success}20` : `${colors.error}20` }}>
-                                <ThemedText className="text-[10px] font-bold" style={{ color: isIncome ? colors.success : colors.error }}>
+                                <ThemedText className="text-[11px] font-bold" style={{ color: isIncome ? colors.success : colors.error }}>
                                     {isIncome ? 'INCOME' : 'EXPENSE'}
                                 </ThemedText>
                             </View>
-                            <View className="px-2 py-0.5 rounded-md" style={{ backgroundColor: `${colors.primary}15` }}>
-                                <ThemedText className="text-[10px] font-bold" style={{ color: colors.primary }}>
+                            <View className="px-2 py-0.5 rounded-md" style={{ borderWidth: 1, borderColor: colors.borderStrong }}>
+                                <ThemedText className="text-[11px] font-bold" style={{ color: colors.primary }}>
                                     {FREQUENCY_LABELS[item.frequency] || item.frequency}
                                 </ThemedText>
                             </View>
                             {isPaused && (
                                 <View className="px-2 py-0.5 rounded-md" style={{ backgroundColor: `${colors.warning}20` }}>
-                                    <ThemedText className="text-[10px] font-bold" style={{ color: colors.warning }}>PAUSED</ThemedText>
+                                    <ThemedText className="text-[11px] font-bold" style={{ color: colors.warning }}>PAUSED</ThemedText>
                                 </View>
                             )}
                         </View>
@@ -806,8 +788,8 @@ export default function RecurringScreen() {
                         className="flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl"
                         style={{ backgroundColor: `${colors.error}10` }}
                     >
-                        <Ionicons name="trash-outline" size={16} color={colors.error} />
-                        <ThemedText className="text-xs font-bold" style={{ color: colors.error }}>Delete</ThemedText>
+                        <Ionicons name="trash-outline" size={16} color={colors.expense} />
+                        <ThemedText className="text-xs font-bold" style={{ color: colors.expense }}>Delete</ThemedText>
                     </Pressable>
                 </View>
             </Animated.View>
@@ -817,22 +799,20 @@ export default function RecurringScreen() {
 
     return (
         <View className="flex-1" style={{ backgroundColor: colors.background }}>
-            <LinearGradient
-                colors={[`${colors.primary}1A`, `${colors.primary}0D`, 'transparent']}
-                className="absolute top-0 left-0 right-0 h-[30%]"
-            />
             <ScrollView
                 className="flex-1"
+                // Manual top inset only: combining it with automatic content
+                // inset adjustment doubled the inset on iOS.
                 style={{ paddingTop: insets.top }}
                 contentContainerStyle={{ paddingBottom: 100 }}
-                contentInsetAdjustmentBehavior="automatic"
+                contentInsetAdjustmentBehavior="never"
             >
                 <ScreenHeader
                     title="Subscriptions & Bills"
                     right={
                         <Pressable
                             onPress={openAddModal}
-                            className="w-11 h-11 rounded-2xl items-center justify-center"
+                            className="w-11 h-11 rounded-xl items-center justify-center"
                             style={{ backgroundColor: colors.primary }}
                         >
                             <Ionicons name="add" size={26} color={colors.white} />
@@ -841,44 +821,15 @@ export default function RecurringScreen() {
                 />
 
                 {/* Expense / Income Tabs */}
-                <View className="px-6 mb-6">
-                    <View className="flex-row rounded-2xl p-1" style={{ backgroundColor: colors.backgroundAlt }}>
-                        <Pressable
-                            onPress={() => setActiveTab('expense')}
-                            className="flex-1 py-3 rounded-xl items-center flex-row justify-center gap-2"
-                            style={{
-                                backgroundColor: activeTab === 'expense' ? colors.surface : 'transparent',
-                                shadowColor: activeTab === 'expense' ? '#000' : 'transparent',
-                                shadowOffset: { width: 0, height: 2 },
-                                shadowOpacity: activeTab === 'expense' ? 0.08 : 0,
-                                shadowRadius: 8,
-                                elevation: activeTab === 'expense' ? 3 : 0,
-                            }}
-                        >
-                            <Ionicons name="trending-down" size={16} color={activeTab === 'expense' ? colors.error : colors.textMuted} />
-                            <ThemedText className="text-sm font-bold" style={{ color: activeTab === 'expense' ? colors.error : colors.textMuted }}>
-                                Expenses
-                            </ThemedText>
-                        </Pressable>
-                        <Pressable
-                            onPress={() => setActiveTab('income')}
-                            className="flex-1 py-3 rounded-xl items-center flex-row justify-center gap-2"
-                            style={{
-                                backgroundColor: activeTab === 'income' ? colors.surface : 'transparent',
-                                shadowColor: activeTab === 'income' ? '#000' : 'transparent',
-                                shadowOffset: { width: 0, height: 2 },
-                                shadowOpacity: activeTab === 'income' ? 0.08 : 0,
-                                shadowRadius: 8,
-                                elevation: activeTab === 'income' ? 3 : 0,
-                            }}
-                        >
-                            <Ionicons name="trending-up" size={16} color={activeTab === 'income' ? colors.success : colors.textMuted} />
-                            <ThemedText className="text-sm font-bold" style={{ color: activeTab === 'income' ? colors.success : colors.textMuted }}>
-                                Income
-                            </ThemedText>
-                        </Pressable>
-                    </View>
-                </View>
+                <SegmentedControl
+                    options={[
+                        { key: 'expense', label: 'Expenses' },
+                        { key: 'income', label: 'Income' },
+                    ]}
+                    value={activeTab}
+                    onChange={setActiveTab}
+                    className="mx-5 mb-5"
+                />
 
                 {loading ? (
                     <View className="py-20 items-center">
@@ -891,7 +842,7 @@ export default function RecurringScreen() {
                         subtitle={`Your recurring ${activeTab === 'income' ? 'income' : 'expenses'} will appear here.`}
                     />
                 ) : (
-                    <View className="px-6">
+                    <View className="px-5">
                         {filteredItems.map((item, i) => renderItem(item, i))}
                     </View>
                 )}

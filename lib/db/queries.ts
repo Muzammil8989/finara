@@ -6,11 +6,16 @@ import {
   desc,
   eq,
   gte,
+  isNull,
   like,
   lte,
+  ne,
+  notInArray,
+  sql,
   sum
 } from 'drizzle-orm';
 import { logger } from '../logger';
+import { parseLocalDate, toISODateString, todayString } from '../utils/date';
 import { getDb } from './db-client';
 import {
   accounts,
@@ -27,6 +32,7 @@ import {
 } from './schema';
 
 import type {
+  HouseholdExpense,
   NewAccount,
   NewBudget,
   NewCategory,
@@ -48,10 +54,32 @@ export type {
  */
 
 /**
- * Get current balance (totalIncome - totalExpense) from all transactions
+ * System categories for money moving between people (lending, borrowing,
+ * repaying). These change balances but are not income or spending, so every
+ * income/spending total, chart, budget and export summary leaves them out.
+ */
+export const TRANSFER_CATEGORY_NAMES = [
+  'Loan Given', 'Loan Received',        // money lent / borrowed / repaid
+  'Transfer Out', 'Transfer In',        // between your own accounts
+  'To Savings', 'From Savings',         // into / out of a savings goal
+] as const;
+
+export function isTransferCategory(name: string | null | undefined): boolean {
+  return !!name && (TRANSFER_CATEGORY_NAMES as readonly string[]).includes(name);
+}
+
+/** SQL condition: the transaction is real income/spending, not a transfer. */
+const notTransfer = () =>
+  sql`${transactions.category_id} NOT IN (SELECT id FROM categories WHERE name IN ('Loan Given', 'Loan Received', 'Transfer Out', 'Transfer In', 'To Savings', 'From Savings'))`;
+
+/**
+ * Get current balance across all accounts:
+ * SUM(opening balances) + totalIncome - totalExpense.
+ * Matches the per-account figures from getAccountsWithBalance().
  */
 export async function getCurrentBalance(): Promise<number> {
   const db = getDb();
+  const [opening] = await db.select({ total: sum(accounts.balance) }).from(accounts);
   const result = await db
     .select({
       type: transactions.type,
@@ -66,7 +94,7 @@ export async function getCurrentBalance(): Promise<number> {
     if (row.type === 'income') income = Number(row.total) || 0;
     else expense = Number(row.total) || 0;
   }
-  return income - expense;
+  return (Number(opening?.total) || 0) + income - expense;
 }
 
 /**
@@ -76,15 +104,13 @@ export async function createTransaction(
   transaction: NewTransaction
 ): Promise<typeof transactions.$inferSelect> {
   const db = getDb();
-  const result = await db.transaction(async (tx) => {
-    return tx
-      .insert(transactions)
-      .values({
-        ...transaction,
-        date: transaction.date || new Date().toISOString().split('T')[0],
-      })
-      .returning();
-  });
+  const result = await db
+    .insert(transactions)
+    .values({
+      ...transaction,
+      date: transaction.date || todayString(),
+    })
+    .returning();
   return result[0];
 }
 
@@ -155,7 +181,7 @@ export async function getSummaryByDateRange(
   endDate: string
 ) {
   const db = getDb();
-  const conditions = [between(transactions.date, startDate, endDate)];
+  const conditions = [between(transactions.date, startDate, endDate), notTransfer()];
 
   return db
     .select({
@@ -188,31 +214,67 @@ export async function updateTransaction(
   updates: Partial<NewTransaction>
 ) {
   const db = getDb();
-  const result = await db.transaction(async (tx) => {
-    return tx
-      .update(transactions)
-      .set({
-        ...updates,
-        updated_at: new Date().toISOString(),
-      })
-      .where(eq(transactions.id, id))
-      .returning();
-  });
+  const result = await db
+    .update(transactions)
+    .set({
+      ...updates,
+      updated_at: new Date().toISOString(),
+    })
+    .where(eq(transactions.id, id))
+    .returning();
   return result[0];
 }
 
 /**
- * Delete transaction — also removes any loan or loan payment whose primary
- * transaction_id matches this record, keeping loan data consistent.
+ * Delete a transaction and keep linked records consistent, atomically:
+ * - a loan's origin transaction (money lent/borrowed) deletes the loan + payments
+ * - a loan's repayment transfer only un-marks the loan as transferred
+ * - a household transfer's income deletes the paired household expense
+ *
+ * NOTE: the expo-sqlite Drizzle driver is synchronous. Transactions must use a
+ * sync callback with .run()/.all(); an async callback commits before its
+ * awaited statements run and never rolls back.
  */
 export async function deleteTransaction(id: number) {
   const db = getDb();
-  await db.transaction(async (tx) => {
-    // If a loan was created with this transaction, delete the loan (cascades its payments)
-    await tx.delete(loans).where(eq(loans.transaction_id, id));
-    // If a loan payment was linked to this transaction, delete the payment record
-    await tx.delete(loanPayments).where(eq(loanPayments.transaction_id, id));
-    await tx.delete(transactions).where(eq(transactions.id, id));
+  const tx = await getTransactionById(id);
+  const legacyHouseholdExpenseId =
+    tx && tx.type === 'income' && tx.notes === HOUSEHOLD_TRANSFER_NOTE
+      ? await findLegacyHouseholdTransferExpenseId(tx.date, tx.amount)
+      : null;
+
+  db.transaction((t) => {
+    // A savings deposit/withdrawal: undo its effect on the goal.
+    if (tx?.savings_goal_id) {
+      const [goal] = t.select().from(savingsGoals).where(eq(savingsGoals.id, tx.savings_goal_id)).all();
+      if (goal) {
+        const deltaCents = (tx.type === 'expense' ? -1 : 1) * toCents(tx.amount);
+        const savedCents = Math.max(0, toCents(goal.saved_amount) + deltaCents);
+        t.update(savingsGoals)
+          .set({ saved_amount: savedCents / 100, is_completed: savedCents >= toCents(goal.target_amount) ? 1 : 0, updated_at: new Date().toISOString() })
+          .where(eq(savingsGoals.id, goal.id))
+          .run();
+      }
+    }
+    // An account transfer is two rows: remove its other half too.
+    if (tx?.transfer_group) {
+      t.delete(transactions).where(and(eq(transactions.transfer_group, tx.transfer_group), ne(transactions.id, id))).run();
+    }
+
+    const originLoans = t.select({ id: loans.id }).from(loans).where(eq(loans.origin_transaction_id, id)).all();
+    for (const loan of originLoans) {
+      t.delete(loanPayments).where(eq(loanPayments.loan_id, loan.id)).run();
+      t.delete(loans).where(eq(loans.id, loan.id)).run();
+    }
+    t.update(loans).set({ transaction_id: null }).where(eq(loans.transaction_id, id)).run();
+    t.delete(loanPayments).where(eq(loanPayments.transaction_id, id)).run();
+
+    t.delete(householdExpenses).where(eq(householdExpenses.linked_transaction_id, id)).run();
+    if (legacyHouseholdExpenseId !== null) {
+      t.delete(householdExpenses).where(eq(householdExpenses.id, legacyHouseholdExpenseId)).run();
+    }
+
+    t.delete(transactions).where(eq(transactions.id, id)).run();
   });
 }
 
@@ -223,18 +285,16 @@ export async function deleteTransaction(id: number) {
 /**
  * Get all categories
  */
-export async function getCategories(type?: 'income' | 'expense') {
+export async function getCategories(type?: 'income' | 'expense', options: { includeSystem?: boolean } = {}) {
   const db = getDb();
-
-  if (type) {
-    return db
-      .select()
-      .from(categories)
-      .where(eq(categories.type, type))
-      .orderBy(asc(categories.name));
-  }
-
-  return db.select().from(categories).orderBy(asc(categories.name));
+  // System categories (loans, transfers, savings) are bookkeeping, not something
+  // to tag a purchase with, rename or delete — keep them out of pickers.
+  const visible = options.includeSystem ? undefined : notInArray(categories.name, [...TRANSFER_CATEGORY_NAMES]);
+  return db
+    .select()
+    .from(categories)
+    .where(and(type ? eq(categories.type, type) : undefined, visible))
+    .orderBy(asc(categories.name));
 }
 
 /**
@@ -296,6 +356,16 @@ export async function deleteCategory(id: number) {
     throw new Error(
       'Cannot delete category with associated transactions'
     );
+  }
+
+  // Recurring bills reference categories with ON DELETE RESTRICT; say so
+  // plainly instead of surfacing "FOREIGN KEY constraint failed".
+  const [recurring] = await db
+    .select({ count: count() })
+    .from(recurringExpenses)
+    .where(eq(recurringExpenses.category_id, id));
+  if ((recurring?.count ?? 0) > 0) {
+    throw new Error('This category is used by a recurring bill. Delete or change that bill first.');
   }
 
   await db.delete(categories).where(eq(categories.id, id));
@@ -376,13 +446,45 @@ export async function createRecurringExpense(
   expense: NewRecurringExpense
 ): Promise<typeof recurringExpenses.$inferSelect> {
   const db = getDb();
-  const result = await db.transaction(async (tx) => {
-    return tx
-      .insert(recurringExpenses)
-      .values(expense)
-      .returning();
-  });
+  const result = await db
+    .insert(recurringExpenses)
+    .values(expense)
+    .returning();
   return result[0];
+}
+
+/**
+ * Save a transaction and make it recurring in one step: the first occurrence
+ * is this transaction, so the recurring entry starts as already processed for
+ * that date (otherwise the processor would create a duplicate).
+ */
+export async function createTransactionWithRecurring(
+  transaction: NewTransaction & { date: string },
+  frequency: NewRecurringExpense['frequency']
+) {
+  const db = getDb();
+  return db.transaction((t) => {
+    const [recurring] = t
+      .insert(recurringExpenses)
+      .values({
+        category_id: transaction.category_id,
+        account_id: transaction.account_id,
+        amount: transaction.amount,
+        frequency,
+        start_date: transaction.date,
+        last_processed: transaction.date,
+        notes: transaction.notes ?? null,
+        is_active: 1,
+      })
+      .returning()
+      .all();
+    const [created] = t
+      .insert(transactions)
+      .values({ ...transaction, recurring_id: recurring.id })
+      .returning()
+      .all();
+    return { transaction: created, recurring };
+  });
 }
 
 /**
@@ -495,12 +597,10 @@ export async function createBudget(
   budget: NewBudget
 ): Promise<typeof budgets.$inferSelect> {
   const db = getDb();
-  const result = await db.transaction(async (tx) => {
-    return tx
-      .insert(budgets)
-      .values(budget)
-      .returning();
-  });
+  const result = await db
+    .insert(budgets)
+    .values(budget)
+    .returning();
   return result[0];
 }
 
@@ -547,7 +647,7 @@ export async function getBudgetSpend(
   endDate: string
 ) {
   const db = getDb();
-  const conditions = [between(transactions.date, startDate, endDate)];
+  const conditions = [between(transactions.date, startDate, endDate), notTransfer()];
 
   if (categoryId !== null) {
     conditions.push(eq(transactions.category_id, categoryId));
@@ -601,8 +701,22 @@ export async function getAccountsWithBalance() {
 
   return accountList.map(account => ({
     ...account,
+    /** The stored opening balance. Edit forms must use this, not `balance`. */
+    initial_balance: account.balance,
     balance: account.balance + (incomeMap.get(account.id) || 0) - (expenseMap.get(account.id) || 0),
   }));
+}
+
+export type AccountWithBalance = Awaited<ReturnType<typeof getAccountsWithBalance>>[number];
+
+/**
+ * Accounts are always in the profile currency (there is no per-account
+ * choice), so when the profile currency changes, every account follows.
+ * Otherwise balances in different "currencies" would be added together.
+ */
+export async function setAccountsCurrency(code: string) {
+  const db = getDb();
+  await db.update(accounts).set({ currency: code, updated_at: new Date().toISOString() });
 }
 
 /**
@@ -668,20 +782,26 @@ export async function deleteAccount(id: number) {
   }
 
   await db.delete(accounts).where(eq(accounts.id, id));
+  defaultAccountEnsured = false;
 }
 
+let defaultAccountEnsured = false;
+
 /**
- * Initialize default account if none exists
+ * Create a default account if none exists. Checked once per app session
+ * (it used to run a query on every accounts refresh).
  */
-export async function ensureDefaultAccount() {
+export async function ensureDefaultAccount(currency: string = 'USD') {
+  if (defaultAccountEnsured) return;
   try {
     const existingAccounts = await getAccounts();
+    defaultAccountEnsured = true;
     if (existingAccounts.length === 0) {
       await createAccount({
         name: 'Main Account',
         type: 'checking',
         balance: 0,
-        currency: 'USD',
+        currency,
         icon: 'wallet',
         color: '#246BFD',
       });
@@ -722,7 +842,8 @@ export async function getExpenseByCategory(
     .where(
       and(
         eq(transactions.type, 'expense'),
-        between(transactions.date, startDate, endDate)
+        between(transactions.date, startDate, endDate),
+        notTransfer()
       )
     )
     .groupBy(categories.id)
@@ -746,53 +867,39 @@ export interface MonthlyTotals {
   expense: number;
 }
 
-/** Last N months income vs expense totals */
-export async function getMonthlyTotals(months = 6): Promise<MonthlyTotals[]> {
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Income vs expense for exactly the last `months` calendar months, ending with
+ * the current month (oldest first). Months with no transactions are 0, and
+ * future-dated transactions are ignored. Filtering and grouping run in SQL.
+ */
+export async function getMonthlyTotals(months = 6, now: Date = new Date()): Promise<MonthlyTotals[]> {
   const db = getDb();
+  const first = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const monthKey = sql<string>`substr(${transactions.date}, 1, 7)`;
+
   const rows = await db
-    .select({
-      date: transactions.date,
-      type: transactions.type,
-      amount: transactions.amount,
-    })
+    .select({ key: monthKey, type: transactions.type, total: sum(transactions.amount) })
     .from(transactions)
-    .orderBy(asc(transactions.date));
+    .where(and(between(transactions.date, toISODateString(first), toISODateString(last)), notTransfer()))
+    .groupBy(monthKey, transactions.type);
 
-  // Group in JS — SQLite strftime grouping is simpler this way
-  const map = new Map<string, { income: number; expense: number }>();
+  const result: (MonthlyTotals & { key: string })[] = [];
+  for (let i = 0; i < months; i++) {
+    const d = new Date(first.getFullYear(), first.getMonth() + i, 1);
+    const key = toISODateString(d).slice(0, 7);
+    result.push({ key, month: SHORT_MONTHS[d.getMonth()], year: d.getFullYear(), income: 0, expense: 0 });
+  }
+  const byKey = new Map(result.map(r => [r.key, r]));
   for (const row of rows) {
-    const key = row.date.slice(0, 7); // "YYYY-MM"
-    if (!map.has(key)) map.set(key, { income: 0, expense: 0 });
-    const entry = map.get(key)!;
-    if (row.type === 'income') entry.income += row.amount;
-    else entry.expense += row.amount;
+    const entry = byKey.get(row.key);
+    if (!entry) continue;
+    if (row.type === 'income') entry.income = Number(row.total) || 0;
+    else entry.expense = Number(row.total) || 0;
   }
-
-  const SHORT_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const result: MonthlyTotals[] = [];
-  for (const [key, val] of map.entries()) {
-    const [y, m] = key.split('-');
-    result.push({
-      month: SHORT_MONTHS[parseInt(m) - 1],
-      year: parseInt(y),
-      income: val.income,
-      expense: val.expense,
-    });
-  }
-
-  // Sort chronologically using the original YYYY-MM key, then slice
-  const keyed = Array.from(map.entries()).map(([key, val]) => {
-    const [y, m] = key.split('-');
-    return {
-      key,
-      month: SHORT_MONTHS[parseInt(m) - 1],
-      year: parseInt(y),
-      income: val.income,
-      expense: val.expense,
-    };
-  });
-  keyed.sort((a, b) => a.key.localeCompare(b.key));
-  return keyed.slice(-months).map(({ key: _k, ...rest }) => rest);
+  return result.map(({ key: _key, ...rest }) => rest);
 }
 
 export interface DailySpend {
@@ -800,34 +907,32 @@ export interface DailySpend {
   amount: number;
 }
 
-/** Daily expense totals for a month */
+/**
+ * Daily expense totals for a month, one entry per day from `startDate` to
+ * `endDate` (or today, if earlier), with 0 for days without spending so the
+ * chart's points line up with calendar days.
+ */
 export async function getDailySpending(
   startDate: string,
-  endDate: string
+  endDate: string,
+  now: Date = new Date()
 ): Promise<DailySpend[]> {
   const db = getDb();
   const rows = await db
-    .select({
-      date: transactions.date,
-      amount: transactions.amount,
-    })
+    .select({ date: transactions.date, total: sum(transactions.amount) })
     .from(transactions)
-    .where(
-      and(
-        eq(transactions.type, 'expense'),
-        between(transactions.date, startDate, endDate)
-      )
-    );
+    .where(and(eq(transactions.type, 'expense'), between(transactions.date, startDate, endDate), notTransfer()))
+    .groupBy(transactions.date);
+  const byDate = new Map(rows.map(r => [r.date, Number(r.total) || 0]));
 
-  const map = new Map<number, number>();
-  for (const row of rows) {
-    const day = parseInt(row.date.split('-')[2]);
-    map.set(day, (map.get(day) || 0) + row.amount);
+  const today = toISODateString(now);
+  const stop = endDate < today ? endDate : today;
+  const result: DailySpend[] = [];
+  for (let d = parseLocalDate(startDate); toISODateString(d) <= stop; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    const key = toISODateString(d);
+    result.push({ day: d.getDate(), amount: byDate.get(key) ?? 0 });
   }
-
-  return Array.from(map.entries())
-    .map(([day, amount]) => ({ day, amount }))
-    .sort((a, b) => a.day - b.day);
+  return result;
 }
 
 /**
@@ -863,10 +968,99 @@ export async function updateSavingsGoal(
   return result[0];
 }
 
-/** Delete a savings goal */
+/**
+ * Delete a savings goal. Its deposits and withdrawals are removed too, so the
+ * money it held goes back to the accounts it came from.
+ */
 export async function deleteSavingsGoal(id: number) {
   const db = getDb();
-  await db.delete(savingsGoals).where(eq(savingsGoals.id, id));
+  db.transaction((t) => {
+    t.delete(transactions).where(eq(transactions.savings_goal_id, id)).run();
+    t.delete(savingsGoals).where(eq(savingsGoals.id, id)).run();
+  });
+}
+
+/** Look up (creating if needed) a system category by name and type. */
+async function ensureSystemCategory(name: (typeof TRANSFER_CATEGORY_NAMES)[number], type: 'income' | 'expense', icon: string) {
+  const db = getDb();
+  const find = () => db.select({ id: categories.id }).from(categories).where(eq(categories.name, name)).limit(1);
+  let [row] = await find();
+  if (!row) {
+    await db.insert(categories).values({ name, type, icon, color: '#8C7A5B' }).onConflictDoNothing();
+    [row] = await find();
+  }
+  return row.id;
+}
+
+/**
+ * Move money between two of your own accounts. Recorded as a pair of rows
+ * (out of one, into the other) sharing a transfer_group, so balances move but
+ * nothing counts as income or spending. Deleting either row removes both.
+ */
+export async function createAccountTransfer(input: {
+  fromAccountId: number;
+  toAccountId: number;
+  amount: number;
+  date: string;
+  notes?: string | null;
+}): Promise<string> {
+  if (input.fromAccountId === input.toAccountId) throw new Error('Choose two different accounts');
+  if (!(input.amount > 0)) throw new Error('Enter an amount above zero');
+  const outId = await ensureSystemCategory('Transfer Out', 'expense', 'swap-horizontal-outline');
+  const inId = await ensureSystemCategory('Transfer In', 'income', 'swap-horizontal-outline');
+  const group = `tr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const db = getDb();
+  db.transaction((t) => {
+    const base = { amount: input.amount, date: input.date, notes: input.notes ?? null, transfer_group: group };
+    t.insert(transactions).values({ ...base, type: 'expense', category_id: outId, account_id: input.fromAccountId }).run();
+    t.insert(transactions).values({ ...base, type: 'income', category_id: inId, account_id: input.toAccountId }).run();
+  });
+  return group;
+}
+
+/**
+ * Put money into a savings goal from an account (or take it back out). The
+ * account balance moves and the goal's saved amount follows, in one DB
+ * transaction; neither counts as income or spending.
+ */
+export async function moveSavings(input: {
+  goalId: number;
+  accountId: number;
+  amount: number;
+  date: string;
+  direction: 'deposit' | 'withdraw';
+}): Promise<{ saved_amount: number; is_completed: number }> {
+  if (!(input.amount > 0)) throw new Error('Enter an amount above zero');
+  const deposit = input.direction === 'deposit';
+  const categoryId = deposit
+    ? await ensureSystemCategory('To Savings', 'expense', 'arrow-down-circle-outline')
+    : await ensureSystemCategory('From Savings', 'income', 'arrow-up-circle-outline');
+  const db = getDb();
+  return db.transaction((t) => {
+    const [goal] = t.select().from(savingsGoals).where(eq(savingsGoals.id, input.goalId)).all();
+    if (!goal) throw new Error('Goal not found');
+    const savedCents = toCents(goal.saved_amount);
+    const amountCents = toCents(input.amount);
+    if (deposit && amountCents > toCents(goal.target_amount) - savedCents) {
+      throw new Error(`Only ${((toCents(goal.target_amount) - savedCents) / 100).toFixed(2)} left to reach this goal`);
+    }
+    if (!deposit && amountCents > savedCents) {
+      throw new Error(`Only ${(savedCents / 100).toFixed(2)} saved in this goal`);
+    }
+    t.insert(transactions).values({
+      amount: input.amount,
+      type: deposit ? 'expense' : 'income',
+      category_id: categoryId,
+      account_id: input.accountId,
+      date: input.date,
+      notes: `${deposit ? 'Saved to' : 'Withdrawn from'} ${goal.name}`,
+      savings_goal_id: goal.id,
+    }).run();
+    const nextCents = savedCents + (deposit ? amountCents : -amountCents);
+    const result = { saved_amount: nextCents / 100, is_completed: nextCents >= toCents(goal.target_amount) ? 1 : 0 };
+    t.update(savingsGoals).set({ ...result, updated_at: new Date().toISOString() }).where(eq(savingsGoals.id, goal.id)).run();
+    return result;
+  });
 }
 
 // ─── HOUSEHOLD BUDGET QUERIES ────────────────────────────────────────────────
@@ -921,6 +1115,7 @@ export interface HouseholdExpenseWithCategory {
   notes: string | null;
   created_at: string;
   category_id: number | null;
+  linked_transaction_id: number | null;
   categoryName: string | null;
   categoryIcon: string | null;
   categoryColor: string | null;
@@ -937,6 +1132,7 @@ export async function getHouseholdExpenses(startDate: string, endDate: string): 
       notes: householdExpenses.notes,
       created_at: householdExpenses.created_at,
       category_id: householdExpenses.category_id,
+      linked_transaction_id: householdExpenses.linked_transaction_id,
       categoryName: categories.name,
       categoryIcon: categories.icon,
       categoryColor: categories.color,
@@ -975,29 +1171,104 @@ export async function deleteHouseholdExpense(id: number) {
   await db.delete(householdExpenses).where(eq(householdExpenses.id, id));
 }
 
-/** Find and delete the income transaction that was created for a household transfer */
-export async function deleteLinkedTransferTransaction(date: string, amount: number) {
+export const HOUSEHOLD_TRANSFER_NOTE = 'Household budget transfer';
+const HOUSEHOLD_TRANSFER_PREFIX = 'transfer-out:';
+
+/** Amounts are stored as REAL; compare to the cent rather than exactly. */
+const sameCents = (col: typeof transactions.amount | typeof householdExpenses.amount, amount: number) =>
+  sql`round(${col} * 100) = ${Math.round(amount * 100)}`;
+
+/**
+ * Move money out of the household budget into an account, atomically:
+ * one income transaction + one household expense linked to it by id.
+ */
+export async function createHouseholdTransfer(data: {
+  amount: number;
+  accountId: number;
+  accountName: string;
+  incomeCategoryId: number;
+  date: string;
+}) {
   const db = getDb();
-  await db.delete(transactions).where(
-    and(
-      eq(transactions.date, date),
-      eq(transactions.amount, amount),
-      eq(transactions.type, 'income'),
-      eq(transactions.notes, 'Household budget transfer'),
-    )
-  );
+  return db.transaction((t) => {
+    const [income] = t
+      .insert(transactions)
+      .values({
+        amount: data.amount,
+        type: 'income',
+        category_id: data.incomeCategoryId,
+        account_id: data.accountId,
+        date: data.date,
+        notes: HOUSEHOLD_TRANSFER_NOTE,
+      })
+      .returning()
+      .all();
+    const [expense] = t
+      .insert(householdExpenses)
+      .values({
+        amount: data.amount,
+        category_id: null,
+        date: data.date,
+        notes: `${HOUSEHOLD_TRANSFER_PREFIX}${data.accountName}`,
+        linked_transaction_id: income.id,
+        created_at: new Date().toISOString(),
+      })
+      .returning()
+      .all();
+    return { income, expense };
+  });
 }
 
-/** Find and delete the household expense that was created for a transfer — reverse link */
-export async function deleteLinkedHouseholdTransferExpense(date: string, amount: number) {
+/** Pre-link transfers (before DB v9) have no id link: find exactly one match. */
+async function findLegacyHouseholdTransferExpenseId(date: string, amount: number): Promise<number | null> {
   const db = getDb();
-  await db.delete(householdExpenses).where(
-    and(
+  const [row] = await db
+    .select({ id: householdExpenses.id })
+    .from(householdExpenses)
+    .where(and(
+      isNull(householdExpenses.linked_transaction_id),
       eq(householdExpenses.date, date),
-      eq(householdExpenses.amount, amount),
-      like(householdExpenses.notes, 'transfer-out:%'),
-    )
-  );
+      sameCents(householdExpenses.amount, amount),
+      like(householdExpenses.notes, `${HOUSEHOLD_TRANSFER_PREFIX}%`),
+    ))
+    .orderBy(asc(householdExpenses.id))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+async function findLegacyHouseholdTransferTransactionId(date: string, amount: number): Promise<number | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(and(
+      eq(transactions.date, date),
+      sameCents(transactions.amount, amount),
+      eq(transactions.type, 'income'),
+      eq(transactions.notes, HOUSEHOLD_TRANSFER_NOTE),
+      sql`${transactions.id} not in (select linked_transaction_id from household_expenses where linked_transaction_id is not null)`,
+    ))
+    .orderBy(asc(transactions.id))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+/**
+ * Delete a household expense. If it is a transfer-out, its paired income
+ * transaction is deleted too, in the same DB transaction.
+ */
+export async function deleteHouseholdExpenseWithLink(
+  expense: Pick<HouseholdExpense, 'id' | 'date' | 'amount' | 'notes' | 'linked_transaction_id'>
+) {
+  const db = getDb();
+  let txId = expense.linked_transaction_id ?? null;
+  if (txId === null && expense.notes?.startsWith(HOUSEHOLD_TRANSFER_PREFIX)) {
+    txId = await findLegacyHouseholdTransferTransactionId(expense.date, expense.amount);
+  }
+  db.transaction((t) => {
+    t.delete(householdExpenses).where(eq(householdExpenses.id, expense.id)).run();
+    if (txId !== null) t.delete(transactions).where(eq(transactions.id, txId)).run();
+  });
 }
 
 /** Delete ALL expenses in a given date range — called after a transfer to reset the period */
@@ -1082,6 +1353,7 @@ export interface LoanWithDetails {
   amount: number;
   account_id: number;
   transaction_id: number | null;
+  origin_transaction_id: number | null;
   date: string;
   due_date: string | null;
   notes: string | null;
@@ -1163,7 +1435,7 @@ export async function getLoans(filters?: { type?: 'given' | 'taken'; isSettled?:
   });
 
   return rows.map((loan) => {
-    const settled_amount = loan.payments.reduce((sum, p) => sum + p.amount, 0);
+    const settled_amount = loan.payments.reduce((sum, p) => sum + toCents(p.amount), 0) / 100;
     return {
       id: loan.id,
       type: loan.type,
@@ -1171,6 +1443,7 @@ export async function getLoans(filters?: { type?: 'given' | 'taken'; isSettled?:
       amount: loan.amount,
       account_id: loan.account_id,
       transaction_id: loan.transaction_id ?? null,
+      origin_transaction_id: loan.origin_transaction_id ?? null,
       date: loan.date,
       due_date: loan.due_date ?? null,
       notes: loan.notes ?? null,
@@ -1188,29 +1461,52 @@ export async function getLoans(filters?: { type?: 'given' | 'taken'; isSettled?:
         created_at: p.created_at,
       })),
       settled_amount,
-      remaining_amount: Math.max(0, loan.amount - settled_amount),
+      remaining_amount: Math.max(0, toCents(loan.amount) - toCents(settled_amount)) / 100,
     };
   });
 }
 
-/** Create a loan record. No transaction is created — balance only changes on "Transfer to Account". */
+/** Money is compared in whole cents to avoid float drift (0.7 + 0.4 !== 1.1). */
+export const toCents = (amount: number) => Math.round(amount * 100);
+
+/**
+ * Create a loan and book the money leaving (given) or entering (taken) the
+ * account, atomically. The later "Transfer to Account" books the repayment,
+ * so a fully repaid loan nets to zero on the balance.
+ */
 export async function createLoan(
-  data: Omit<NewLoan, 'id' | 'transaction_id' | 'created_at' | 'updated_at'>,
-  _categoryIds: { expenseCategoryId: number; incomeCategoryId: number }
+  data: Omit<NewLoan, 'id' | 'transaction_id' | 'origin_transaction_id' | 'created_at' | 'updated_at'>,
+  categoryIds: { expenseCategoryId: number; incomeCategoryId: number }
 ): Promise<LoanWithDetails> {
   const db = getDb();
+  const now = new Date().toISOString();
 
-  const loanResult = await db
-    .insert(loans)
-    .values({
-      ...data,
-      transaction_id: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .returning();
-
-  const loan = loanResult[0];
+  const loan = db.transaction((t) => {
+    const [origin] = t
+      .insert(transactions)
+      .values({
+        category_id: data.type === 'given' ? categoryIds.expenseCategoryId : categoryIds.incomeCategoryId,
+        account_id: data.account_id,
+        amount: data.amount,
+        type: data.type === 'given' ? 'expense' : 'income',
+        date: data.date,
+        notes: data.type === 'given' ? `Loan given to ${data.person_name}` : `Loan taken from ${data.person_name}`,
+      })
+      .returning()
+      .all();
+    const [created] = t
+      .insert(loans)
+      .values({
+        ...data,
+        transaction_id: null,
+        origin_transaction_id: origin.id,
+        created_at: now,
+        updated_at: now,
+      })
+      .returning()
+      .all();
+    return created;
+  });
   const account = await db
     .select({ name: accounts.name, icon: accounts.icon, color: accounts.color })
     .from(accounts)
@@ -1238,19 +1534,23 @@ export async function updateLoan(id: number, updates: Partial<Pick<NewLoan, 'per
   return result[0];
 }
 
-/** Delete a loan record, its payments, and its linked transfer transaction if present. */
+/** Delete a loan, its payments, and its origin + transfer transactions, atomically. */
 export async function deleteLoan(id: number): Promise<void> {
   const db = getDb();
-  const [loan] = await db
-    .select({ transaction_id: loans.transaction_id })
-    .from(loans)
-    .where(eq(loans.id, id))
-    .limit(1);
-  // Delete the transfer transaction first (FK will set loan.transaction_id to null)
-  if (loan?.transaction_id) {
-    await db.delete(transactions).where(eq(transactions.id, loan.transaction_id));
-  }
-  await db.delete(loans).where(eq(loans.id, id));
+  db.transaction((t) => {
+    const [loan] = t
+      .select({ transaction_id: loans.transaction_id, origin_transaction_id: loans.origin_transaction_id })
+      .from(loans)
+      .where(eq(loans.id, id))
+      .limit(1)
+      .all();
+    if (!loan) return;
+    t.delete(loanPayments).where(eq(loanPayments.loan_id, id)).run();
+    t.delete(loans).where(eq(loans.id, id)).run();
+    for (const txId of [loan.transaction_id, loan.origin_transaction_id]) {
+      if (txId) t.delete(transactions).where(eq(transactions.id, txId)).run();
+    }
+  });
 }
 
 /**
@@ -1265,17 +1565,28 @@ export async function createLoanPayment(
 ): Promise<void> {
   const db = getDb();
 
-  await db.transaction(async (tx) => {
-    await tx
-      .insert(loanPayments)
-      .values({ ...data, transaction_id: null, created_at: new Date().toISOString() });
+  db.transaction((t) => {
+    // Re-read inside the transaction: the caller's loan snapshot may be stale
+    // (double tap, list not yet refreshed), which used to allow overpaying and
+    // leave a fully-paid loan stuck as unsettled.
+    const [current] = t.select({ amount: loans.amount }).from(loans).where(eq(loans.id, loan.id)).all();
+    if (!current) throw new Error('Loan not found');
+    const [paidRow] = t.select({ total: sum(loanPayments.amount) }).from(loanPayments).where(eq(loanPayments.loan_id, loan.id)).all();
+    const paidCents = toCents(Number(paidRow?.total) || 0);
+    const owedCents = toCents(current.amount) - paidCents;
+    if (toCents(data.amount) > owedCents) {
+      throw new Error(`Payment is more than the ${(Math.max(owedCents, 0) / 100).toFixed(2)} still owed`);
+    }
 
-    const newSettled = loan.settled_amount + data.amount;
-    if (newSettled >= loan.amount) {
-      await tx
-        .update(loans)
+    t.insert(loanPayments)
+      .values({ ...data, transaction_id: null, created_at: new Date().toISOString() })
+      .run();
+
+    if (paidCents + toCents(data.amount) >= toCents(current.amount)) {
+      t.update(loans)
         .set({ is_settled: 1, updated_at: new Date().toISOString() })
-        .where(eq(loans.id, loan.id));
+        .where(eq(loans.id, loan.id))
+        .run();
     }
   });
 }
@@ -1303,29 +1614,36 @@ export async function transferLoanToAccount(
     ? categoryIds.incomeCategoryId
     : categoryIds.expenseCategoryId;
 
-  await db.transaction(async (tx) => {
-    const txResult = await tx
+  if (loan.transaction_id) throw new Error('Loan already transferred');
+  const [paidRow] = await db.select({ total: sum(loanPayments.amount) }).from(loanPayments).where(eq(loanPayments.loan_id, loanId));
+  if (toCents(Number(paidRow?.total) || 0) < toCents(loan.amount)) {
+    throw new Error('Loan is not fully repaid yet');
+  }
+
+  db.transaction((t) => {
+    const txResult = t
       .insert(transactions)
       .values({
         category_id: catId,
         account_id: loan.account_id,
         amount: loan.amount,
         type: txType,
-        date: new Date().toISOString().split('T')[0],
+        date: todayString(),
         notes: loan.type === 'given'
           ? `Loan repaid by ${loan.person_name}`
           : `Loan repaid to ${loan.person_name}`,
       })
-      .returning();
+      .returning()
+      .all();
 
-    await tx
-      .update(loans)
+    t.update(loans)
       .set({
         transaction_id: txResult[0].id,
         is_settled: 1,
         updated_at: new Date().toISOString(),
       })
-      .where(eq(loans.id, loanId));
+      .where(eq(loans.id, loanId))
+      .run();
   });
 }
 

@@ -1,17 +1,18 @@
 import { useUser } from '@/features/user/context/user-context';
+import tokens from '@/theme/tokens';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { logger } from '@/lib/logger';
 import * as ImagePicker from 'expo-image-picker';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AvatarPicker } from './_onboarding/avatar-picker';
-import { ContinueButton } from './_onboarding/continue-button';
-import { OnboardingHeader } from './_onboarding/onboarding-header';
-import { ProfileForm } from './_onboarding/profile-form';
+import { AvatarPicker } from '@/features/onboarding/components/avatar-picker';
+import { IntroCarousel } from '@/features/onboarding/components/intro-carousel';
+import { ContinueButton } from '@/features/onboarding/components/continue-button';
+import { OnboardingHeader } from '@/features/onboarding/components/onboarding-header';
+import { ProfileForm } from '@/features/onboarding/components/profile-form';
 
 export default function OnboardingScreen() {
     const { profile, updateProfile } = useUser();
@@ -24,6 +25,8 @@ export default function OnboardingScreen() {
     const [avatar, setAvatar] = useState<string | null>(profile.avatar ?? null);
     const [currency, setCurrency] = useState(profile.currency ?? 'USD');
     const [isLoading, setIsLoading] = useState(false);
+    // First launch: a short tour of the app, then profile setup.
+    const [showIntro, setShowIntro] = useState(true);
 
     // Track whether the local form has diverged from the profile yet — once
     // the user types anything, stop pulling fresh values from context.
@@ -91,6 +94,8 @@ export default function OnboardingScreen() {
         }
         setIsLoading(true);
         try {
+            // Navigate here, not from a root-layout effect watching isOnboarded:
+            // that effect never reliably fired, leaving the button doing nothing.
             await updateProfile({ name: name.trim(), avatar, currency, isOnboarded: true });
             router.replace('/(tabs)');
         } catch (error) {
@@ -101,13 +106,10 @@ export default function OnboardingScreen() {
         }
     }, [isLoading, name, avatar, currency, updateProfile]);
 
+    if (showIntro) return <IntroCarousel onDone={() => setShowIntro(false)} />;
+
     return (
-        <LinearGradient
-            colors={[colors.primaryDark, colors.primary, colors.primaryLight]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={{ flex: 1 }}
-        >
+        <View style={{ flex: 1, backgroundColor: tokens.brand.primary }}>
             <KeyboardAvoidingView
                 className="flex-1"
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -122,7 +124,7 @@ export default function OnboardingScreen() {
 
                     {/* Card — rounded top creates the wave break */}
                     <View
-                        className="flex-1 rounded-t-[40px] px-6 pt-5"
+                        className="flex-1 rounded-t-3xl px-5 pt-6"
                         style={{ backgroundColor: colors.surface, paddingBottom: insets.bottom + 20 }}
                     >
                         <View style={{ flex: 1, justifyContent: 'center' }}>
@@ -138,6 +140,6 @@ export default function OnboardingScreen() {
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
-        </LinearGradient>
+        </View>
     );
 }

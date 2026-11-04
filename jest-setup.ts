@@ -79,9 +79,46 @@ jest.mock('burnt', () => ({
   alert: jest.fn(),
 }));
 
-jest.mock('react-native-reanimated', () =>
-  require('react-native-reanimated/mock')
-);
+// The official mock predates useReducedMotion; add it (motion on by default).
+jest.mock('react-native-reanimated', () => ({
+  ...require('react-native-reanimated/mock'),
+  useReducedMotion: () => false,
+}));
+
+// NativeWind's color-scheme API needs the compiled Tailwind runtime, which
+// Jest doesn't run. Keep the rest of the module and stub the scheme hook.
+jest.mock('nativewind', () => {
+  const actual = jest.requireActual('nativewind');
+  const setColorScheme = jest.fn();
+  return {
+    ...actual,
+    useColorScheme: () => ({ colorScheme: 'light', setColorScheme, toggleColorScheme: jest.fn() }),
+  };
+});
+
+// gifted-charts animates via raw setTimeout and can fire after the test
+// environment is torn down (crashing the worker). Our code is what's under
+// test, so render each chart as a View that exposes its data.
+jest.mock('react-native-gifted-charts', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const chart = (name: string) => {
+    const Chart = (props: { data?: unknown[] }) =>
+      React.createElement(View, { testID: name, accessibilityHint: `${props.data?.length ?? 0} points` });
+    Chart.displayName = name;
+    return Chart;
+  };
+  return { BarChart: chart('BarChart'), LineChart: chart('LineChart'), PieChart: chart('PieChart') };
+});
+
+// Icon fonts are irrelevant in tests; render each icon as a Text with its name.
+jest.mock('@expo/vector-icons', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  const Icon = ({ name, testID }: { name: string; testID?: string }) =>
+    React.createElement(Text, { testID }, name);
+  return new Proxy({}, { get: (_t, key) => (key === '__esModule' ? true : Icon) });
+});
 
 jest.mock('@/lib/db/db-client', () => ({
   getDb: jest.fn(() => ({

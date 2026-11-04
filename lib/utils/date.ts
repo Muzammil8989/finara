@@ -18,6 +18,47 @@ export function todayString(): string {
     return toISODateString(new Date());
 }
 
+/**
+ * Parse a date string as a LOCAL date.
+ * `new Date('2025-03-10')` is parsed as UTC midnight, which is the previous
+ * day for anyone west of UTC. Date-only strings must be built from parts.
+ * Strings with a time component are passed through to the Date constructor.
+ */
+export function parseLocalDate(dateStr: string): Date {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return new Date(dateStr);
+}
+
+/** Whole calendar days from `from` to `to` (DST-safe; ignores time of day). */
+export function diffCalendarDays(from: Date, to: Date): number {
+    const a = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate());
+    const b = Date.UTC(to.getFullYear(), to.getMonth(), to.getDate());
+    return Math.round((b - a) / 86_400_000);
+}
+
+/**
+ * Add months, clamping to the last day of the target month
+ * (Jan 31 + 1 month = Feb 28/29, not Mar 3).
+ * `anchorDay` keeps the original day for later steps (Feb 28 -> Mar 31).
+ */
+export function addMonthsClamped(date: Date, months: number, anchorDay: number = date.getDate()): Date {
+    const target = new Date(date.getFullYear(), date.getMonth() + months, 1);
+    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    target.setDate(Math.min(anchorDay, lastDay));
+    return target;
+}
+
+/**
+ * Monday of the week containing `date` (local time). The whole app uses
+ * Monday-start weeks: Budgets, budget alerts and the Activity "Week" filter
+ * previously disagreed (Sunday vs Monday).
+ */
+export function startOfWeek(date: Date = new Date()): Date {
+    const daysFromMonday = (date.getDay() + 6) % 7; // Sun→6, Mon→0
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() - daysFromMonday);
+}
+
 /** Format a YYYY-MM-DD string to human-readable "Jan 1, 2025" */
 export function formatDateDisplay(dateStr: string): string {
     const [y, m, d] = dateStr.split('-').map(Number);
@@ -27,13 +68,13 @@ export function formatDateDisplay(dateStr: string): string {
 
 /** Format a date string to a readable locale-aware format (e.g., "Jan 1, 2025") */
 export function formatDate(dateString: string, locale: string = 'en-US'): string {
-    const date = new Date(dateString);
+    const date = parseLocalDate(dateString);
     return date.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 /** Format a date to a short format (e.g., "Jan 1") */
 export function formatDateShort(dateString: string, locale: string = 'en-US'): string {
-    const date = new Date(dateString);
+    const date = parseLocalDate(dateString);
     return date.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
 }
 
@@ -94,12 +135,12 @@ export function getEndOfMonth(date: Date = new Date()): Date {
 
 /** Check if a date string is today */
 export function isToday(dateString: string): boolean {
-    return new Date(dateString).toDateString() === new Date().toDateString();
+    return parseLocalDate(dateString).toDateString() === new Date().toDateString();
 }
 
 /** Check if a date string is in the current month */
 export function isCurrentMonth(dateString: string): boolean {
-    const date = new Date(dateString);
+    const date = parseLocalDate(dateString);
     const today = new Date();
     return date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
 }
@@ -112,11 +153,8 @@ export function getPeriodDateRange(period: string): { startDate: string; endDate
         const today = toISODateString(now);
         return { startDate: today, endDate: today };
     } else if (period === 'weekly') {
-        const day = now.getDay();
-        const start = new Date(now);
-        start.setDate(now.getDate() - day);
-        const end = new Date(start);
-        end.setDate(start.getDate() + 6);
+        const start = startOfWeek(now);
+        const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
         return { startDate: toISODateString(start), endDate: toISODateString(end) };
     } else if (period === 'monthly') {
         const start = new Date(now.getFullYear(), now.getMonth(), 1);

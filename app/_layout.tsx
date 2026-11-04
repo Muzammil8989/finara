@@ -1,6 +1,11 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { PlayfairDisplay_700Bold_Italic } from '@expo-google-fonts/playfair-display';
+import {
+  PlayfairDisplay_400Regular_Italic,
+  PlayfairDisplay_600SemiBold,
+  PlayfairDisplay_700Bold,
+  PlayfairDisplay_700Bold_Italic,
+} from '@expo-google-fonts/playfair-display';
 import {
   PlusJakartaSans_400Regular,
   PlusJakartaSans_500Medium,
@@ -27,21 +32,25 @@ import Animated, {
 import '../global.css';
 
 import { ErrorBoundary, LockScreen } from '@/components/layouts';
+import { ThemedText } from '@/components/common';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { darkColors, lightColors } from '@/theme/colors';
+import { MAX_CONTENT_WIDTH } from '@/hooks/use-content-width';
 import { logger } from '@/lib/logger';
 import { SQLiteDatabase, SQLiteProvider } from 'expo-sqlite';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '@/features/auth/context/auth-context';
-import { ModalProvider } from '@/context/modal-context';
+import { ModalProvider, useModalActions } from '@/providers/modal-context';
 import { UserProvider, useUser } from '@/features/user/context/user-context';
 import { setDbInstance } from '@/lib/db/db-client';
 import { clearDatabase, initializeDatabase } from '@/lib/db/migrations';
 import { useEffect, useRef, useState } from 'react';
 import * as Notifications from 'expo-notifications';
 import { NotificationService } from '@/features/notifications/services/notification-service';
-import { BackupService } from '@/services/backup-service';
+import { BackupService } from '@/features/backup/services/backup-service';
+import { processRecurringTransactions } from '@/features/recurring/services/recurring-processor';
 
-const PRIMARY_COLOR = '#246BFD';
+const PRIMARY_COLOR = lightColors.primary;
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -99,8 +108,8 @@ export const unstable_settings = {
 // During the very first push of a lazy-imported screen, react-native-screens paints
 // that color in the gap before the screen content mounts — visible as a hairline
 // "shadow" leaking at the slide edge. Override with the app's real backgrounds.
-const APP_LIGHT_BG = '#F4F7FA';
-const APP_DARK_BG = '#0E1117';
+const APP_LIGHT_BG = lightColors.background;
+const APP_DARK_BG = darkColors.background;
 
 const AppLightTheme = {
   ...DefaultTheme,
@@ -165,6 +174,25 @@ function RootLayoutContent() {
     return () => sub.remove();
   }, [isLoading]);
 
+  // Book due recurring bills/income on launch and whenever the app returns to
+  // the foreground (the date may have rolled over while it was backgrounded).
+  const { triggerRefresh } = useModalActions();
+  useEffect(() => {
+    if (isLoading || !profile.isOnboarded) return;
+
+    const runRecurring = () => {
+      processRecurringTransactions().then((result) => {
+        if (result.success && result.created > 0) triggerRefresh();
+      });
+    };
+
+    runRecurring();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') runRecurring();
+    });
+    return () => sub.remove();
+  }, [isLoading, profile.isOnboarded, triggerRefresh]);
+
   // Effect 1: once mounted and data loaded, resolve the initial route then fade the overlay.
   useEffect(() => {
     if (!mounted || isLoading) return;
@@ -206,25 +234,29 @@ function RootLayoutContent() {
   }, [mounted, isLoading]);
 
   // Effect 2: react to profile.isOnboarded changes after init (completing onboarding).
+  // Navigation to the tabs is done by the onboarding screen itself.
   useEffect(() => {
     if (!mounted || isLoading || prevIsOnboardedRef.current === null) return;
 
-    const wasOnboarded = prevIsOnboardedRef.current;
     const isNowOnboarded = profile.isOnboarded;
     prevIsOnboardedRef.current = isNowOnboarded;
-
-    if (!wasOnboarded && isNowOnboarded) {
-      router.replace('/(tabs)');
-    }
 
     if (isNowOnboarded && !hasNotifiedRef.current) {
       hasNotifiedRef.current = true;
       NotificationService.scheduleDailyReminder().catch(() => {});
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, isLoading, profile.isOnboarded]);
 
   const showLock = isSecurityEnabled && isLocked;
+
+  // Privacy cover: with a PIN set, hide balances from the app switcher
+  // snapshot (taken while the app is inactive / backgrounded).
+  const [appHidden, setAppHidden] = useState(AppState.currentState !== 'active');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => setAppHidden(state !== 'active'));
+    return () => sub.remove();
+  }, []);
+  const showPrivacyCover = isSecurityEnabled && appHidden && !showLock;
 
   const screenBg = colorScheme === 'dark' ? APP_DARK_BG : APP_LIGHT_BG;
   const opaqueContent = { contentStyle: { backgroundColor: screenBg } };
@@ -242,6 +274,10 @@ function RootLayoutContent() {
        * inputs, and tab positions survive an app re-open / lock cycle.
        */}
       {mounted && (
+        // Centred reading column on tablets / landscape (see useContentWidth);
+        // the surround uses the app background so the edges never flash white.
+        <View style={{ flex: 1, backgroundColor: colorScheme === 'dark' ? APP_DARK_BG : APP_LIGHT_BG }}>
+        <View style={{ flex: 1, width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' }}>
         <Stack
           screenOptions={{
             headerShown: false,
@@ -272,9 +308,21 @@ function RootLayoutContent() {
           <Stack.Screen name="privacy" options={opaqueContent} />
           <Stack.Screen name="+not-found" />
         </Stack>
+        </View>
+        </View>
       )}
 
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+
+      {showPrivacyCover && (
+        <View
+          style={[StyleSheet.absoluteFillObject, { backgroundColor: colorScheme === 'dark' ? APP_DARK_BG : APP_LIGHT_BG, alignItems: 'center', justifyContent: 'center' }]}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          <ThemedText style={{ fontFamily: 'PlayfairDisplay_700Bold_Italic', fontSize: 40, color: colorScheme === 'dark' ? darkColors.accent : lightColors.primary }}>Folio</ThemedText>
+        </View>
+      )}
 
       {showLock && (
         <View style={StyleSheet.absoluteFillObject}>
@@ -307,6 +355,9 @@ function RootLayoutContent() {
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
+    PlayfairDisplay_400Regular_Italic,
+    PlayfairDisplay_600SemiBold,
+    PlayfairDisplay_700Bold,
     PlayfairDisplay_700Bold_Italic,
     PlusJakartaSans_400Regular,
     PlusJakartaSans_500Medium,
