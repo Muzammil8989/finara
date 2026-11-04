@@ -29,6 +29,7 @@ import { getMonthlyTotals, isTransferCategory, type MonthlyTotals } from '@/lib/
 import { parseLocalDate, toISODateString } from '@/lib/utils/date';
 import { logger } from '@/lib/logger';
 import { useModals } from '@/providers/modal-context';
+import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { type Href, router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -187,13 +188,27 @@ export default function OverviewScreen() {
                 }
             >
                 {/* 0 ── Masthead (scrolls away) ─────────────────────────── */}
-                <View className="px-5 pt-4 pb-4">
-                    <ThemedText type="kicker" className="mb-1.5">
-                        {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
-                    </ThemedText>
-                    <ThemedText type="display" numberOfLines={1} adjustsFontSizeToFit accessibilityRole="header">
-                        {greeting(new Date())}
-                    </ThemedText>
+                <View className="px-5 pt-4 pb-4 flex-row items-start">
+                    <View className="flex-1 mr-3">
+                        <ThemedText type="kicker" className="mb-1.5">
+                            {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+                        </ThemedText>
+                        <ThemedText type="display" numberOfLines={1} adjustsFontSizeToFit accessibilityRole="header">
+                            {greeting(new Date())}
+                        </ThemedText>
+                    </View>
+                    {/* Clearly labelled way into Settings (the avatar below also opens it). */}
+                    <Pressable
+                        onPress={() => router.push('/settings' as Href)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Settings"
+                        accessibilityHint="Profile, currency, security, backup and more"
+                        className="flex-row items-center h-11 pl-3 pr-4 rounded-full border border-borderStrong dark:border-dark-borderStrong"
+                        style={({ pressed }) => ({ backgroundColor: pressed ? colors.backgroundAlt : colors.surface })}
+                    >
+                        <Ionicons name="settings-outline" size={18} color={colors.textPrimary} />
+                        <ThemedText type="label" className="ml-1.5">Settings</ThemedText>
+                    </Pressable>
                 </View>
 
                 {/* 1 ── Sticky band: name + balance ─────────────────────── */}

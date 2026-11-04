@@ -54,6 +54,12 @@ describe('Overview', () => {
     expect(await screen.findByLabelText('Current Balance: -$40.00')).toBeTruthy();
   });
 
+  it('has a clearly labelled Settings button', async () => {
+    await renderWithProviders(<OverviewScreen />);
+    // The header button and the Tools row both lead to Settings.
+    expect((await screen.findAllByLabelText('Settings')).length).toBe(2);
+  });
+
   it('pins a band with the name and balance to the top while scrolling', async () => {
     await q.updateAccount(accountId, { balance: 1000 });
     await renderWithProviders(<OverviewScreen />);

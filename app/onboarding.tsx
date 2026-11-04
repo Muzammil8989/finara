@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AvatarPicker } from '@/features/onboarding/components/avatar-picker';
 import { IntroCarousel } from '@/features/onboarding/components/intro-carousel';
+import { IntroService } from '@/features/onboarding/services/intro-service';
 import { ContinueButton } from '@/features/onboarding/components/continue-button';
 import { OnboardingHeader } from '@/features/onboarding/components/onboarding-header';
 import { ProfileForm } from '@/features/onboarding/components/profile-form';
@@ -26,7 +27,17 @@ export default function OnboardingScreen() {
     const [currency, setCurrency] = useState(profile.currency ?? 'USD');
     const [isLoading, setIsLoading] = useState(false);
     // First launch: a short tour of the app, then profile setup.
-    const [showIntro, setShowIntro] = useState(true);
+    // Only a brand-new user sees the intro, once. null = still checking.
+    const [showIntro, setShowIntro] = useState<boolean | null>(null);
+    useEffect(() => {
+        let alive = true;
+        IntroService.hasSeen().then(seen => { if (alive) setShowIntro(!seen); });
+        return () => { alive = false; };
+    }, []);
+    const finishIntro = useCallback(() => {
+        setShowIntro(false);
+        IntroService.markSeen();
+    }, []);
 
     // Track whether the local form has diverged from the profile yet — once
     // the user types anything, stop pulling fresh values from context.
@@ -106,7 +117,8 @@ export default function OnboardingScreen() {
         }
     }, [isLoading, name, avatar, currency, updateProfile]);
 
-    if (showIntro) return <IntroCarousel onDone={() => setShowIntro(false)} />;
+    if (showIntro === null) return <View style={{ flex: 1, backgroundColor: colors.background }} />;
+    if (showIntro) return <IntroCarousel onDone={finishIntro} />;
 
     return (
         <View style={{ flex: 1, backgroundColor: tokens.brand.primary }}>

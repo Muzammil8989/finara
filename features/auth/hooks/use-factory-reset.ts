@@ -3,6 +3,7 @@ import { useAuth } from '@/features/auth/context/auth-context';
 import { SecurityService } from '@/features/auth/services/security-service';
 import { useUser } from '@/features/user/context/user-context';
 import { BackupService } from '@/features/backup/services/backup-service';
+import { IntroService } from '@/features/onboarding/services/intro-service';
 import { clearDatabase } from '@/lib/db/migrations';
 import * as Notifications from 'expo-notifications';
 import { logger } from '@/lib/logger';
@@ -31,6 +32,7 @@ export function useFactoryReset() {
         // never stop the reset itself.
         try {
             await BackupService.clearSettings();
+            await IntroService.reset(); // the next user is new: show the intro again
             await Notifications.cancelAllScheduledNotificationsAsync();
         } catch (e) {
             logger.error('Factory reset cleanup failed', e);
