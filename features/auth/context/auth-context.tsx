@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
+import * as ScreenCapture from 'expo-screen-capture';
 import { logger } from '@/lib/logger';
 import { SecurityService } from '../services/security-service';
 
@@ -33,6 +34,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsSecurityEnabled(enabled);
         if (!enabled) setIsLocked(false);
     };
+
+    // With a PIN / biometrics on, keep balances out of the app-switcher
+    // thumbnail and screenshots. On Android the JS privacy cover can render too
+    // late for the recents snapshot; FLAG_SECURE is applied natively.
+    useEffect(() => {
+        if (isLoading) return;
+        (async () => {
+            try {
+                if (isSecurityEnabled) await ScreenCapture.preventScreenCaptureAsync();
+                else await ScreenCapture.allowScreenCaptureAsync();
+            } catch (error) {
+                logger.error('Failed to update screen capture protection', error);
+            }
+        })();
+    }, [isSecurityEnabled, isLoading]);
 
     // The biometric prompt is NOT triggered here: the LockScreen prompts when
     // it mounts. Prompting in both places opened two prompts at cold start.

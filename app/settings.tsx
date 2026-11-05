@@ -7,8 +7,8 @@ import { logger } from '@/lib/logger';
 import { useNotifications } from '@/features/notifications/hooks/use-notifications';
 import * as ImagePicker from 'expo-image-picker';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -24,7 +24,7 @@ import { SettingsHeader } from '@/features/settings/components/settings-header';
 
 export default function SettingsScreen() {
     const insets = useSafeAreaInsets();
-    const { isSecurityEnabled } = useAuth();
+    const { recheckSecurity } = useAuth();
     const factoryReset = useFactoryReset();
     const { triggerRefresh } = useModalActions();
     const { profile, updateProfile } = useUser();
@@ -39,7 +39,9 @@ export default function SettingsScreen() {
     const [editName, setEditName] = useState(profile.name);
     const [editAvatar, setEditAvatar] = useState(profile.avatar);
 
-    useEffect(() => {
+    // Reload on focus too: coming back from security-setup may have added a
+    // PIN without changing "security enabled" (biometric-only → PIN).
+    useFocusEffect(useCallback(() => {
         let mounted = true;
         Promise.all([
             SecurityService.getBiometricStatus(),
@@ -54,7 +56,7 @@ export default function SettingsScreen() {
             logger.error('Failed to load security status', e);
         });
         return () => { mounted = false; };
-    }, [isSecurityEnabled]);
+    }, []));
 
 const openProfileModal = () => {
         setEditName(profile.name);
@@ -86,14 +88,21 @@ const openProfileModal = () => {
 
     const toggleBio = async () => {
         const newVal = !bioEnabled;
+        // Changing an unlock method needs the owner present: turning it on
+        // proves biometrics work, turning it off can't be done by whoever
+        // picks up the unlocked phone.
+        if (!(await SecurityService.authenticateBio())) return;
         await SecurityService.setBiometricPreference(newVal);
         setBioEnabled(newVal);
+        await recheckSecurity();
     };
 
     const handleSecurityPin = () => {
+        // Go by the PIN itself, not "security enabled": in biometric-only mode
+        // there is no PIN to verify, so "remove" could never succeed.
         router.push({
             pathname: '/security-setup',
-            params: { mode: isSecurityEnabled ? 'remove' : 'set' },
+            params: { mode: isPinSet ? 'remove' : 'set' },
         });
     };
 
@@ -169,7 +178,6 @@ const openProfileModal = () => {
                     />
 
                     <SecuritySection
-                        isSecurityEnabled={isSecurityEnabled}
                         isPinSet={isPinSet}
                         bioAvailable={bioAvailable}
                         bioEnabled={bioEnabled}

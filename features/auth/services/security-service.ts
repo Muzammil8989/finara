@@ -99,11 +99,13 @@ export const SecurityService = {
                 if (setAt && now < setAt) return { locked: true, remainingMs: until - setAt };
                 const remaining = until - now;
                 if (remaining > 0) return { locked: true, remainingMs: remaining };
-                // Lockout over: allow a fresh round of attempts. The lockout
-                // *level* is kept, so the next lockout is longer.
+                // Lockout over: allow ONE more try, not a fresh round. Otherwise
+                // moving the clock forward would hand out 5 guesses per jump.
+                // The lockout *level* is kept, so the next lockout is longer.
+                // Only a correct PIN (resetAttempts) clears the counter.
                 await SecureStore.deleteItemAsync(PIN_LOCKOUT_KEY);
                 await SecureStore.deleteItemAsync(PIN_LOCKOUT_SET_KEY);
-                await SecureStore.deleteItemAsync(PIN_ATTEMPTS_KEY);
+                await SecureStore.setItemAsync(PIN_ATTEMPTS_KEY, String(MAX_PIN_ATTEMPTS - 1));
             }
         } catch (error) {
             logger.error('Failed to check lockout status', error);
