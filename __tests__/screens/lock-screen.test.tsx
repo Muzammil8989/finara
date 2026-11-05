@@ -1,5 +1,6 @@
 jest.unmock('@/lib/db/db-client');
 import { LockScreen } from '@/components/layouts/lock-screen';
+import { ObscuredContent } from '@/components/layouts/obscured-content';
 import { RELOCK_AFTER_MS, useAuth } from '@/features/auth/context/auth-context';
 import { SecurityService } from '@/features/auth/services/security-service';
 import * as q from '@/lib/db/queries';
@@ -8,6 +9,7 @@ import { installInMemorySecureStore } from '@/tests/helpers/secure-store';
 import { createTestDb, TestDb } from '@/tests/helpers/test-db';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as ScreenCapture from 'expo-screen-capture';
 import { router } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React from 'react';
@@ -51,6 +53,46 @@ const appStateListeners = () => {
   });
   return (state: AppStateStatus) => act(() => listeners.forEach(l => l(state)));
 };
+
+/** _layout.tsx keeps the app mounted UNDER the lock screen; it must be hidden from screen readers. */
+function OverlayGate() {
+  const { isLocked, isSecurityEnabled, isLoading } = useAuth();
+  if (isLoading) return null;
+  const showLock = isSecurityEnabled && isLocked;
+  return (
+    <>
+      <ObscuredContent hidden={showLock}><Text>Balance 1,000</Text></ObscuredContent>
+      {showLock && <LockScreen />}
+    </>
+  );
+}
+
+describe('Lock screen hides the app from screen readers', () => {
+  it('app content under the lock screen is not reachable by accessibility', async () => {
+    await renderWithProviders(<OverlayGate />, { secureStore: pinStore });
+    await screen.findByLabelText('1');
+    expect(screen.queryByText('Balance 1,000')).toBeNull();
+    expect(screen.getByText('Balance 1,000', { includeHiddenElements: true })).toBeTruthy();
+  });
+
+  it('blocks screen capture (app-switcher snapshot) while a PIN is set', async () => {
+    await renderWithProviders(<OverlayGate />, { secureStore: pinStore });
+    await waitFor(() => expect(ScreenCapture.preventScreenCaptureAsync).toHaveBeenCalled());
+    expect(ScreenCapture.allowScreenCaptureAsync).not.toHaveBeenCalled();
+  });
+
+  it('allows screen capture when no security is set', async () => {
+    await renderWithProviders(<OverlayGate />, { secureStore: {} });
+    await waitFor(() => expect(ScreenCapture.allowScreenCaptureAsync).toHaveBeenCalled());
+    expect(ScreenCapture.preventScreenCaptureAsync).not.toHaveBeenCalled();
+  });
+
+  it('app content is reachable again after unlocking', async () => {
+    await renderWithProviders(<OverlayGate />, { secureStore: pinStore });
+    for (const d of ['1', '2', '3', '4']) fireEvent.press(await screen.findByLabelText(d));
+    expect(await screen.findByText('Balance 1,000', {}, { timeout: 2000 })).toBeTruthy();
+  });
+});
 
 describe('Lock screen', () => {
   it('unlocks with the correct PIN', async () => {

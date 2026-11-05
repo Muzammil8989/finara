@@ -4,6 +4,7 @@ import { logger } from '@/lib/logger';
 import { UserService } from '@/features/user/services/user-service';
 import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
+import { SecurityService } from '@/features/auth/services/security-service';
 import { Platform } from 'react-native';
 
 const PREF_KEY = 'notifications_enabled';
@@ -11,6 +12,12 @@ const DAILY_REMINDER_ID = 'finara-daily-reminder';
 // Legacy identifier from when the app was named "WealthFlow". Kept here only so
 // upgraded installs can cancel the stale schedule still sitting in the OS queue.
 const LEGACY_DAILY_REMINDER_ID = 'wf-daily-reminder';
+
+/**
+ * Notifications show on the phone's lock screen, outside the app's PIN.
+ * With app security on, keep names and amounts out of them.
+ */
+const keepPrivate = () => SecurityService.isSecurityConfigured();
 
 export const NotificationService = {
     async requestPermissions(): Promise<boolean> {
@@ -77,10 +84,11 @@ export const NotificationService = {
             if (!(await this.isEnabled())) return;
             const nameList = names.slice(0, 3).join(', ');
             const more = names.length > 3 ? ` +${names.length - 3} more` : '';
+            const summary = `${count} bill${count > 1 ? 's' : ''} auto-processed`;
             await Notifications.scheduleNotificationAsync({
                 content: {
                     title: 'Recurring Bills Processed',
-                    body: `${count} bill${count > 1 ? 's' : ''} auto-processed: ${nameList}${more}`,
+                    body: (await keepPrivate()) ? `${summary}. Open Folio to review.` : `${summary}: ${nameList}${more}`,
                     sound: true,
                 },
                 trigger: null,
@@ -100,6 +108,7 @@ export const NotificationService = {
             if (!(await this.isEnabled())) return;
             const profile = await UserService.getProfile();
             const budgetsRaw = await getBudgetsWithDetails();
+            const hideDetails = await keepPrivate();
             const relevant = budgetsRaw.filter(b => b.category_id === null || b.category_id === categoryId);
 
             for (const budget of relevant) {
@@ -117,7 +126,9 @@ export const NotificationService = {
                     await Notifications.scheduleNotificationAsync({
                         content: {
                             title: 'Budget Alert',
-                            body: `${budget.categoryName || 'Overall'} budget is ${Math.round(percentUsed)}% used — ${tail}`,
+                            body: hideDetails
+                                ? 'A budget has reached its alert limit. Open Folio to review.'
+                                : `${budget.categoryName || 'Overall'} budget is ${Math.round(percentUsed)}% used — ${tail}`,
                             sound: true,
                         },
                         trigger: null,
@@ -150,9 +161,10 @@ export const NotificationService = {
     async sendSavingsMilestone(goalName: string, milestone: number): Promise<void> {
         try {
             if (!(await this.isEnabled())) return;
-            const body = milestone >= 100
+            let body = milestone >= 100
                 ? `${goalName} goal is complete! Congratulations!`
                 : `${goalName} is ${milestone}% complete — keep going!`;
+            if (await keepPrivate()) body = 'A savings goal reached a milestone. Open Folio to see it.';
             await Notifications.scheduleNotificationAsync({
                 content: { title: 'Savings Milestone!', body, sound: true },
                 trigger: null,

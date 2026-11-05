@@ -156,6 +156,23 @@ describe('PIN lockout', () => {
         expect(state.remainingMs).toBe(LOCKOUT_STEPS_MS[0]);
     });
 
+    it('after a lockout ends, a single wrong PIN starts the next one', async () => {
+        await failFive();
+        now += LOCKOUT_STEPS_MS[0] + 1;
+        expect((await SecurityService.isLockedOut()).locked).toBe(false);
+        await SecurityService.verifyPin('0000');
+        const state = await SecurityService.isLockedOut();
+        expect(state.locked).toBe(true);
+        expect(state.remainingMs).toBe(LOCKOUT_STEPS_MS[1]);
+    });
+
+    it('moving the clock forward gives one guess, not a fresh round of five', async () => {
+        await failFive();
+        now += 365 * 24 * 60 * 60 * 1000;
+        expect(await SecurityService.verifyPin('0000')).toBe(false);
+        expect((await SecurityService.isLockedOut()).locked).toBe(true);
+    });
+
     it('a correct PIN after a lockout resets the escalation', async () => {
         await failFive();
         now += LOCKOUT_STEPS_MS[0] + 1;

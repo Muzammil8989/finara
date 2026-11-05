@@ -31,7 +31,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import '../global.css';
 
-import { ErrorBoundary, LockScreen } from '@/components/layouts';
+import { ErrorBoundary, LockScreen, ObscuredContent } from '@/components/layouts';
 import { ThemedText } from '@/components/common';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { darkColors, lightColors } from '@/theme/colors';
@@ -276,7 +276,12 @@ function RootLayoutContent() {
       {mounted && (
         // Centred reading column on tablets / landscape (see useContentWidth);
         // the surround uses the app background so the edges never flash white.
-        <View style={{ flex: 1, backgroundColor: colorScheme === 'dark' ? APP_DARK_BG : APP_LIGHT_BG }}>
+        // Hidden from screen readers while the lock screen / privacy cover is up:
+        // those overlays only cover it visually.
+        <ObscuredContent
+          hidden={showLock || showPrivacyCover}
+          style={{ flex: 1, backgroundColor: colorScheme === 'dark' ? APP_DARK_BG : APP_LIGHT_BG }}
+        >
         <View style={{ flex: 1, width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' }}>
         <Stack
           screenOptions={{
@@ -309,7 +314,7 @@ function RootLayoutContent() {
           <Stack.Screen name="+not-found" />
         </Stack>
         </View>
-        </View>
+        </ObscuredContent>
       )}
 
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
@@ -325,7 +330,7 @@ function RootLayoutContent() {
       )}
 
       {showLock && (
-        <View style={StyleSheet.absoluteFillObject}>
+        <View style={StyleSheet.absoluteFillObject} accessibilityViewIsModal>
           <LockScreen />
         </View>
       )}

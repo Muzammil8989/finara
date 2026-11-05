@@ -5,7 +5,6 @@ import { SettingsItem } from './settings-item';
 import { ToggleRow } from './toggle-row';
 
 interface SecuritySectionProps {
-    isSecurityEnabled: boolean;
     isPinSet: boolean;
     bioAvailable: boolean;
     bioEnabled: boolean;
@@ -14,7 +13,6 @@ interface SecuritySectionProps {
 }
 
 export function SecuritySection({
-    isSecurityEnabled,
     isPinSet,
     bioAvailable,
     bioEnabled,
@@ -26,8 +24,8 @@ export function SecuritySection({
             <SettingsItem
                 icon="lock-closed-outline"
                 title="PIN lock"
-                subtitle={isSecurityEnabled ? 'Tap to remove your PIN' : 'Ask for a PIN when the app opens'}
-                value={isSecurityEnabled ? 'On' : 'Off'}
+                subtitle={isPinSet ? 'Tap to remove your PIN' : 'Ask for a PIN when the app opens'}
+                value={isPinSet ? 'On' : 'Off'}
                 onPress={onPinPress}
                 noBorder={!bioAvailable}
             />
