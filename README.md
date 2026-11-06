@@ -1,29 +1,80 @@
-# Welcome to your Expo app 👋
+<div align="center">
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+<img src="branding/folio/png/lockup-800w.png" alt="Folio" width="360" />
 
-## Get started
+### Your money, clearly kept.
 
-1. Install dependencies
+A private, offline-first personal finance app for iOS, Android and the web, built with Expo and React Native.
 
-   ```bash
-   npm install
-   ```
+[![CI](https://github.com/Muzammil8989/finara/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Muzammil8989/finara/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-0D5C63.svg)](LICENSE)
+[![Expo SDK 54](https://img.shields.io/badge/Expo-SDK%2054-000020?logo=expo)](https://docs.expo.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-B07D1E.svg)](CONTRIBUTING.md)
 
-2. Start the app
+</div>
 
-   ```bash
-   npx expo start
-   ```
+---
 
-In the output, you'll find options to open the app in a
+## Features
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- **Transactions:** log income and expenses, with categories and payment methods
+- **Accounts:** track balances across cash, bank and card accounts
+- **Budgets:** monthly category budgets with progress tracking
+- **Savings goals:** set targets and record contributions
+- **Loans:** money lent and borrowed, with repayment history
+- **Recurring:** scheduled bills and income that post automatically
+- **Household:** shared expenses and settlement history
+- **Reports:** charts and summaries, exportable to PDF
+- **Backup and restore:** export and import your data locally
+- **Security:** PIN and biometric app lock, screen-capture protection, private notifications
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+All data is stored on the device in SQLite. The app does not need an account or a server.
+
+## Tech stack
+
+| Area | Tools |
+| --- | --- |
+| App | [Expo](https://expo.dev) SDK 54, React Native, React 19, [Expo Router](https://docs.expo.dev/router/introduction/) |
+| Styling | [NativeWind](https://www.nativewind.dev/) (Tailwind CSS), design tokens in `theme/` |
+| Data | [expo-sqlite](https://docs.expo.dev/versions/latest/sdk/sqlite/) with [Drizzle ORM](https://orm.drizzle.team/) |
+| Testing | Jest and React Native Testing Library, Detox and Maestro for end-to-end |
+| Quality | ESLint, TypeScript strict mode, GitHub Actions CI |
+
+## Getting started
+
+### Prerequisites
+
+- Node.js 24 (see [`.nvmrc`](.nvmrc); run `nvm use` if you use nvm)
+- npm
+- For native builds: Android Studio or Xcode. See the [Expo environment setup](https://docs.expo.dev/get-started/set-up-your-environment/).
+
+### Install and run
+
+```bash
+git clone https://github.com/Muzammil8989/finara.git
+cd finara
+cp .env.example .env
+npm install
+npm start
+```
+
+Then press `a` for Android, `i` for iOS or `w` for web, or scan the QR code with a development build.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| `npm start` | Start the Expo dev server |
+| `npm run android` / `npm run ios` | Build and run a native app |
+| `npm run web` | Run in the browser |
+| `npm run lint` | Run ESLint |
+| `npm run typecheck` | Run the TypeScript compiler without emitting |
+| `npm test` | Run unit and integration tests |
+| `npm run test:coverage` | Run tests with a coverage report |
+| `npm run test:tz` | Run the date tests in several time zones |
+| `npm run test:e2e:android` / `npm run test:e2e:ios` | Run Detox end-to-end tests |
+| `npm run test:maestro` | Run Maestro flows |
 
 ## Project structure
 
@@ -42,23 +93,30 @@ providers/            app-wide providers (modal state)
 lib/                  db (Drizzle/SQLite), utils, logger, toast
 theme/                design tokens (colors, typography, spacing, shadows)
 types/                shared TypeScript types
+branding/             logo, icons and brand guidelines
 __tests__/ tests/     Jest suites and test helpers
 ```
 
 Domains: accounts, auth, backup, budgets, categories, household, loans, notifications, onboarding, overview, recurring, reports, savings, settings, transactions, user.
 
-Import feature code by deep path (e.g. `@/features/loans/hooks/use-loans`); feature folders have no barrel files.
+Import feature code by deep path (for example `@/features/loans/hooks/use-loans`). Feature folders have no barrel files.
 
-## Learn more
+## Contributing
 
-To learn more about developing your project with Expo, look at the following resources:
+Contributions are welcome. Read the [contributing guide](CONTRIBUTING.md) before you open a pull request. All changes reach `main` through a reviewed pull request with passing CI.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- Report a bug or request a feature: [open an issue](https://github.com/Muzammil8989/finara/issues/new/choose)
+- Report a security problem: see [SECURITY.md](SECURITY.md)
+- Community standards: [Code of Conduct](CODE_OF_CONDUCT.md)
 
-## Join the community
+## Contributors
 
-Join our community of developers creating universal apps.
+Thanks to everyone who has contributed to Folio.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+<a href="https://github.com/Muzammil8989/finara/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Muzammil8989/finara" alt="Contributors" />
+</a>
+
+## License
+
+Released under the [MIT License](LICENSE).
