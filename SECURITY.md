@@ -10,7 +10,7 @@ Only the latest release on `main` receives security fixes.
 
 **Do not open a public issue for a security problem.**
 
-Report it privately through GitHub: go to the repository's **Security** tab and click **Report a vulnerability** ([direct link](https://github.com/Muzammil8989/finara/security/advisories/new)).
+Report it privately through GitHub: go to the repository's **Security** tab and click **Report a vulnerability** ([direct link](https://github.com/Muzammil8989/folio/security/advisories/new)).
 
 Please include:
 

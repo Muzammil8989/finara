@@ -3,7 +3,7 @@
 # Requires the GitHub CLI (https://cli.github.com) and `gh auth login` with admin rights.
 set -euo pipefail
 
-REPO="${1:-Muzammil8989/finara}"
+REPO="${1:-Muzammil8989/folio}"
 RULESET_FILE="$(dirname "$0")/../.github/rulesets/main-protection.json"
 RULESET_NAME="Protect main"
 
