@@ -3,19 +3,45 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 3
     commit-message:
       prefix: chore
       include: scope
+    # Expo SDK pins these versions. Upgrade them together with `npx expo install --fix`
+    # or an Expo SDK upgrade, never one at a time.
+    ignore:
+      - dependency-name: expo
+      - dependency-name: expo-*
+      - dependency-name: '@expo/*'
+      - dependency-name: '@expo-google-fonts/*'
+      - dependency-name: react
+      - dependency-name: react-dom
+      - dependency-name: react-native
+      - dependency-name: react-native-*
+      - dependency-name: '@react-native-community/*'
+      - dependency-name: '@react-navigation/*'
+      - dependency-name: babel-preset-expo
+      - dependency-name: jest-expo
+      - dependency-name: '@types/react'
+      # Major versions can break the app; upgrade them by hand.
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]
     groups:
-      dev-dependencies:
-        dependency-type: development
+      # One pull request for all minor and patch updates.
+      minor-and-patch:
         update-types: [minor, patch]
+      # One pull request for all security fixes.
+      security:
+        applies-to: security-updates
+        patterns: ['*']
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     commit-message:
       prefix: ci
+    groups:
+      actions:
+        patterns: ['*']
