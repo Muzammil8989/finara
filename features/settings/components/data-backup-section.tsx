@@ -1,4 +1,5 @@
 import { AppButton, SheetHeader, ThemedText } from '@/components/common';
+import { MAX_CONTENT_WIDTH } from '@/hooks/use-content-width';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { BackupService } from '@/features/backup/services/backup-service';
 import { logger } from '@/lib/logger';
@@ -173,6 +174,9 @@ export function DataBackupSection({ onRestoreComplete }: { onRestoreComplete?: (
                     />
                     <View
                         style={{
+                            width: '100%',
+                            maxWidth: MAX_CONTENT_WIDTH,
+                            alignSelf: 'center',
                             backgroundColor: colors.surface,
                             borderTopLeftRadius: 24,
                             borderTopRightRadius: 24,

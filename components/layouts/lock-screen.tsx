@@ -19,7 +19,7 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import React, { memo, useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
     FadeIn,
@@ -43,11 +43,23 @@ import { IconSymbol, ThemedText } from '@/components/common';
 // M3 primary at 12% — pressed State Layer color (all platforms)
 const STATE_LAYER_COLOR = 'rgba(13,92,99,0.12)';
 
+// Keypad geometry: 3 explicit rows so keys never wrap on narrow (<392dp) screens.
+const KEY_MAX_SIZE = 80;
+const KEY_GAP = 20;
+const SCREEN_PADDING_X = 24; // px-6
+
+/** Key diameter that always fits three keys + two gaps in the available width. */
+function useKeySize() {
+    const { width } = useWindowDimensions();
+    return Math.floor(Math.min(KEY_MAX_SIZE, (width - SCREEN_PADDING_X * 2 - KEY_GAP * 2) / 3));
+}
+
 // ─── NumberButton ─────────────────────────────────────────────────────────────
 
-const NumberButton = memo(({ value, index, onPress }: {
+const NumberButton = memo(({ value, index, size, onPress }: {
     value: string;
     index: number;
+    size: number;
     onPress: (v: string) => void;
 }) => (
     <Animated.View entering={FadeInDown.delay(300 + index * 20).duration(500).springify().damping(18)}>
@@ -56,7 +68,8 @@ const NumberButton = memo(({ value, index, onPress }: {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 onPress(value);
             }}
-            className="w-20 h-20 items-center justify-center rounded-full bg-surface dark:bg-dark-surface border border-borderSoft dark:border-dark-borderSoft m-3"
+            className="items-center justify-center rounded-full bg-surface dark:bg-dark-surface border border-borderSoft dark:border-dark-borderSoft"
+            style={{ width: size, height: size, borderRadius: size / 2 }}
             android_ripple={{ color: STATE_LAYER_COLOR, borderless: true }}
             accessibilityRole="button"
             accessibilityLabel={value}
@@ -66,7 +79,7 @@ const NumberButton = memo(({ value, index, onPress }: {
                     {/* M3 pressed State Layer — primary at 12%, clips to circle */}
                     {pressed && (
                         <View
-                            style={[StyleSheet.absoluteFillObject, { backgroundColor: STATE_LAYER_COLOR, borderRadius: 40 }]}
+                            style={[StyleSheet.absoluteFillObject, { backgroundColor: STATE_LAYER_COLOR, borderRadius: size / 2 }]}
                             pointerEvents="none"
                         />
                     )}
@@ -136,6 +149,7 @@ export function LockScreen() {
     const factoryReset = useFactoryReset();
     const colors = useThemeColors();
     const shakeOffset = useSharedValue(0);
+    const keySize = useKeySize();
 
     // Determine which auth methods are configured, then auto-trigger bio if preferred
     useEffect(() => {
@@ -245,7 +259,7 @@ export function LockScreen() {
 
     return (
         <SafeAreaView className="flex-1 bg-background dark:bg-dark-background">
-            <View className="flex-1 items-center justify-center px-10">
+            <View className="flex-1 items-center justify-center px-6">
 
                 {/*
                   Logo badge
@@ -316,64 +330,71 @@ export function LockScreen() {
                             ))}
                         </View>
 
-                        {/* Number pad */}
-                        <View className="flex-row flex-wrap justify-center max-w-[320px] mb-8">
-                            {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num, i) => (
-                                <NumberButton key={num} value={num} index={i} onPress={handlePress} />
+                        {/* Number pad — 3 explicit rows so keys never wrap on narrow screens */}
+                        <View style={{ gap: KEY_GAP, marginBottom: 32 }}>
+                            {[['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9']].map((row, r) => (
+                                <View key={row[0]} style={{ flexDirection: 'row', gap: KEY_GAP }}>
+                                    {row.map((num, c) => (
+                                        <NumberButton key={num} value={num} index={r * 3 + c} size={keySize} onPress={handlePress} />
+                                    ))}
+                                </View>
                             ))}
 
-                            {/* Biometric button — only shown when biometric is also preferred */}
-                            {bioPref ? (
+                            <View style={{ flexDirection: 'row', gap: KEY_GAP }}>
+                                {/* Biometric button — only shown when biometric is also preferred */}
+                                {bioPref ? (
+                                    <Animated.View entering={FadeInDown.delay(600).duration(500)}>
+                                        <Pressable
+                                            onPress={handleBio}
+                                            className="items-center justify-center bg-brand-primary/5 rounded-full"
+                                            style={{ width: keySize, height: keySize, borderRadius: keySize / 2 }}
+                                            android_ripple={{ color: STATE_LAYER_COLOR, borderless: true }}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Use biometric authentication"
+                                        >
+                                            {({ pressed }: { pressed: boolean }) => (
+                                                <>
+                                                    {pressed && (
+                                                        <View
+                                                            style={[StyleSheet.absoluteFillObject, { backgroundColor: STATE_LAYER_COLOR, borderRadius: keySize / 2 }]}
+                                                            pointerEvents="none"
+                                                        />
+                                                    )}
+                                                    <IconSymbol name="faceid" color={colors.primary} size={32} />
+                                                </>
+                                            )}
+                                        </Pressable>
+                                    </Animated.View>
+                                ) : (
+                                    <View style={{ width: keySize, height: keySize }} />
+                                )}
+
+                                <NumberButton value="0" index={9} size={keySize} onPress={handlePress} />
+
+                                {/* Backspace button */}
                                 <Animated.View entering={FadeInDown.delay(600).duration(500)}>
                                     <Pressable
-                                        onPress={handleBio}
-                                        className="w-20 h-20 items-center justify-center m-3 bg-brand-primary/5 rounded-full"
+                                        onPress={handleBackspace}
+                                        className="items-center justify-center bg-surface dark:bg-dark-surface rounded-full border border-borderSoft dark:border-dark-borderSoft"
+                                        style={[shadows.sm, { width: keySize, height: keySize, borderRadius: keySize / 2 }]}
                                         android_ripple={{ color: STATE_LAYER_COLOR, borderless: true }}
                                         accessibilityRole="button"
-                                        accessibilityLabel="Use biometric authentication"
+                                        accessibilityLabel="Delete last digit"
                                     >
                                         {({ pressed }: { pressed: boolean }) => (
                                             <>
                                                 {pressed && (
                                                     <View
-                                                        style={[StyleSheet.absoluteFillObject, { backgroundColor: STATE_LAYER_COLOR, borderRadius: 40 }]}
+                                                        style={[StyleSheet.absoluteFillObject, { backgroundColor: STATE_LAYER_COLOR, borderRadius: keySize / 2 }]}
                                                         pointerEvents="none"
                                                     />
                                                 )}
-                                                <IconSymbol name="faceid" color={colors.primary} size={32} />
+                                                <IconSymbol name="delete.left.fill" color={colors.expense} size={28} />
                                             </>
                                         )}
                                     </Pressable>
                                 </Animated.View>
-                            ) : (
-                                <View className="w-20 h-20 m-3" />
-                            )}
-
-                            <NumberButton value="0" index={9} onPress={handlePress} />
-
-                            {/* Backspace button */}
-                            <Animated.View entering={FadeInDown.delay(600).duration(500)}>
-                                <Pressable
-                                    onPress={handleBackspace}
-                                    className="w-20 h-20 items-center justify-center m-3 bg-surface dark:bg-dark-surface rounded-full border border-borderSoft dark:border-dark-borderSoft"
-                                    style={shadows.sm}
-                                    android_ripple={{ color: STATE_LAYER_COLOR, borderless: true }}
-                                    accessibilityRole="button"
-                                    accessibilityLabel="Delete last digit"
-                                >
-                                    {({ pressed }: { pressed: boolean }) => (
-                                        <>
-                                            {pressed && (
-                                                <View
-                                                    style={[StyleSheet.absoluteFillObject, { backgroundColor: STATE_LAYER_COLOR, borderRadius: 40 }]}
-                                                    pointerEvents="none"
-                                                />
-                                            )}
-                                            <IconSymbol name="delete.left.fill" color={colors.expense} size={28} />
-                                        </>
-                                    )}
-                                </Pressable>
-                            </Animated.View>
+                            </View>
                         </View>
                     </>
                 )}

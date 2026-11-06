@@ -3,6 +3,7 @@ import { UserService } from '@/features/user/services/user-service';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from 'expo-secure-store';
 import { getRawDb } from '@/lib/db/db-client';
+import type * as SQLite from 'expo-sqlite';
 import { todayString } from '@/lib/utils/date';
 import { logger } from '@/lib/logger';
 import { NotificationService } from '@/features/notifications/services/notification-service';
@@ -236,7 +237,7 @@ export const BackupService = {
 
     if (Platform.OS === 'android') {
       const backup = await BackupService.exportAllData();
-      const json = JSON.stringify(backup, null, 2);
+      const json = JSON.stringify(backup);
       const date = todayString();
       const fileName = `folio-backup-${date}.json`;
 
@@ -291,7 +292,7 @@ export const BackupService = {
     } else {
       // iOS: saves to the app Documents folder, visible in Files app → Folio
       const backup = await BackupService.exportAllData();
-      const json = JSON.stringify(backup, null, 2);
+      const json = JSON.stringify(backup);
       const date = todayString();
       const fileName = `folio-backup-${date}.json`;
 
@@ -340,35 +341,51 @@ export const BackupService = {
     const bind = (v: unknown): BindVal =>
       v === undefined || v === null ? null : typeof v === 'boolean' ? (v ? 1 : 0) : (v as BindVal);
 
-    // Only insert columns the current schema has (backups may be older/newer).
-    const columnsOf = async (table: string) =>
-      new Set((await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`)).map(c => c.name));
-
     // FK checks off while tables are briefly inconsistent. This pragma is a
-    // no-op inside a transaction, so it is set outside it.
+    // no-op inside a transaction, so it is set outside it. Runs on the app's
+    // own connection: a second (exclusive) connection would lock out the
+    // screens' queries mid-restore.
     await db.execAsync('PRAGMA foreign_keys = OFF;');
     try {
       await db.withTransactionAsync(async () => {
+        const txn = db;
+        // Only insert columns the current schema has (backups may be older/newer).
+        const columnsOf = async (table: string) =>
+          new Set((await txn.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`)).map(c => c.name));
+
         for (const { table } of [...BACKUP_TABLES].reverse()) {
-          await db.execAsync(`DELETE FROM ${table};`);
+          await txn.execAsync(`DELETE FROM ${table};`);
         }
 
         for (const { key, table } of BACKUP_TABLES) {
           const columns = await columnsOf(table);
-          for (const row of data[key]) {
-            const cols = Object.keys(row).filter(c => columns.has(c));
-            if (cols.length === 0) continue;
-            await db.runAsync(
-              `INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
-              cols.map(c => bind(row[c]))
-            );
+          // One prepared statement per column set (normally one per table)
+          // instead of re-parsing the INSERT for every row. Rows missing a
+          // column keep that column's default, as before.
+          const statements = new Map<string, SQLite.SQLiteStatement>();
+          try {
+            for (const row of data[key]) {
+              const cols = Object.keys(row).filter(c => columns.has(c));
+              if (cols.length === 0) continue;
+              const signature = cols.join(',');
+              let stmt = statements.get(signature);
+              if (!stmt) {
+                stmt = await txn.prepareAsync(
+                  `INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`
+                );
+                statements.set(signature, stmt);
+              }
+              await stmt.executeAsync(cols.map(c => bind(row[c])));
+            }
+          } finally {
+            for (const stmt of statements.values()) await stmt.finalizeAsync();
           }
         }
 
         // FKs are off during the load, so verify them before committing: a
         // transaction pointing at a missing account or category would vanish
         // from balances. Throwing here rolls the whole restore back.
-        const broken = await db.getAllAsync<{ table: string }>('PRAGMA foreign_key_check;');
+        const broken = await txn.getAllAsync<{ table: string }>('PRAGMA foreign_key_check;');
         if (broken.length > 0) {
           throw new Error(`This backup is damaged — ${broken.length} record${broken.length === 1 ? '' : 's'} point to missing data. Nothing was changed.`);
         }

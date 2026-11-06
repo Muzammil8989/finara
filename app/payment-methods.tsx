@@ -1,51 +1,27 @@
-import { parseAmount } from '@/lib/utils/currency';
-import tokens from '@/theme/tokens';
-import { AppButton, EmptyState, ScreenHeader, ThemedText } from '@/components/common';
+import { EmptyState, ScreenHeader, ThemedText } from '@/components/common';
+import { AccountFormModal } from '@/features/accounts/components/account-form-modal';
+import { AccountRow } from '@/features/accounts/components/account-row';
 import { useUser } from '@/features/user/context/user-context';
-import { UserService } from '@/features/user/services/user-service';
 import {
     AccountWithBalance,
-    createAccount,
     deleteAccount,
-    getAccountsWithBalance,
-    updateAccount
+    getAccountsWithBalance
 } from '@/lib/db/queries';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
-import { IoniconsName } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     InteractionManager,
-    KeyboardAvoidingView,
     Modal,
-    Platform,
     Pressable,
     ScrollView,
-    TextInput,
     View
 } from 'react-native';
-import Animated, { Easing, FadeInDown, FadeInUp, FadeOutDown } from 'react-native-reanimated';
+import Animated, { Easing, FadeInUp, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-type AccountType = 'checking' | 'savings' | 'credit' | 'cash' | 'other';
-
-const ACCOUNT_TYPES: { value: AccountType; label: string; icon: IoniconsName }[] = [
-    { value: 'checking', label: 'Checking', icon: 'card' },
-    { value: 'savings', label: 'Savings', icon: 'wallet' },
-    { value: 'credit', label: 'Credit Card', icon: 'card-outline' },
-    { value: 'cash', label: 'Cash', icon: 'cash' },
-    { value: 'other', label: 'Other', icon: 'ellipsis-horizontal-circle' },
-];
-
-const ACCOUNT_COLORS: string[] = tokens.swatches;
-
-const ACCOUNT_ICONS = [
-    'wallet', 'card', 'cash', 'business', 'briefcase',
-    'gift', 'home', 'planet', 'rocket', 'shield'
-] as const;
 
 function DeleteConfirmSheet({
     account,
@@ -125,17 +101,11 @@ export default function PaymentMethodsScreen() {
     const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
     const [loading, setLoading] = useState(true);
     const [modalVisible, setModalVisible] = useState(false);
+    // Bumped on every open so the form sheet remounts with fresh state.
+    const [formKey, setFormKey] = useState(0);
     const [editingAccount, setEditingAccount] = useState<AccountWithBalance | null>(null);
     const [deletingAccount, setDeletingAccount] = useState<AccountWithBalance | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
-
-    // Form state
-    const [name, setName] = useState('');
-    const [type, setType] = useState<'checking' | 'savings' | 'credit' | 'cash' | 'other'>('checking');
-    const [balance, setBalance] = useState('0');
-    const [selectedColor, setSelectedColor] = useState(ACCOUNT_COLORS[0]);
-    const [selectedIcon, setSelectedIcon] = useState<typeof ACCOUNT_ICONS[number]>('wallet');
-    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const fetchAccounts = useCallback(async () => {
         try {
@@ -159,70 +129,28 @@ export default function PaymentMethodsScreen() {
         return () => task.cancel();
     }, [fetchAccounts]);
 
-    const openAddModal = () => {
+    const openAddModal = useCallback(() => {
         setEditingAccount(null);
-        setName('');
-        setType('checking');
-        setBalance('0');
-        setSelectedColor(ACCOUNT_COLORS[0]);
-        setSelectedIcon('wallet');
+        setFormKey(k => k + 1);
         setModalVisible(true);
-    };
+    }, []);
 
-    const openEditModal = (account: AccountWithBalance) => {
+    const openEditModal = useCallback((account: AccountWithBalance) => {
         setEditingAccount(account);
-        setName(account.name);
-        setType(account.type);
-        // Edit the stored opening balance; `balance` includes all transactions.
-        setBalance(account.initial_balance.toString());
-        setSelectedColor(account.color || ACCOUNT_COLORS[0]);
-        setSelectedIcon((account.icon as typeof ACCOUNT_ICONS[number]) || 'wallet');
+        setFormKey(k => k + 1);
         setModalVisible(true);
-    };
+    }, []);
 
-    const handleSave = async () => {
-        if (!name.trim()) {
-            toast.error('Please enter a name');
-            return;
-        }
+    const closeModal = useCallback(() => setModalVisible(false), []);
 
-        const numBalance = parseAmount(balance) || 0;
+    const handleSaved = useCallback(() => {
+        setModalVisible(false);
+        fetchAccounts();
+    }, [fetchAccounts]);
 
-        setIsSubmitting(true);
-        try {
-            if (editingAccount) {
-                await updateAccount(editingAccount.id, {
-                    name: name.trim(),
-                    type,
-                    balance: numBalance,
-                    color: selectedColor,
-                    icon: selectedIcon,
-                });
-                toast.success('Payment method updated');
-            } else {
-                await createAccount({
-                    name: name.trim(),
-                    type,
-                    balance: numBalance,
-                    currency: profile.currency || 'USD',
-                    color: selectedColor,
-                    icon: selectedIcon,
-                });
-                toast.success('Payment method added');
-            }
-            setModalVisible(false);
-            fetchAccounts();
-        } catch (error: any) {
-            logger.error('Error saving account:', error);
-            toast.error(error.message || 'Failed to save payment method');
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
-    const handleDelete = (account: AccountWithBalance) => {
+    const handleDelete = useCallback((account: AccountWithBalance) => {
         setDeletingAccount(account);
-    };
+    }, []);
 
     const handleConfirmDelete = async () => {
         if (!deletingAccount) return;
@@ -240,167 +168,10 @@ export default function PaymentMethodsScreen() {
         }
     };
 
-    const renderModal = () => (
-        <Modal
-            visible={modalVisible}
-            animationType="slide"
-            transparent={true}
-            onRequestClose={() => setModalVisible(false)}
-        >
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}
-            >
-                <Animated.View
-                    entering={FadeInDown.duration(350)}
-                    className="bg-surface dark:bg-dark-surface rounded-t-3xl px-6 pt-4 max-h-[90%]"
-                    style={{ paddingBottom: insets.bottom + 40 }}
-                >
-                    <View className="w-9 h-1 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-5" />
-                    <View className="flex-row justify-between items-center mb-8">
-                        <ThemedText type="title" className="text-2xl font-bold">
-                            {editingAccount ? 'Edit Payment Method' : 'Add Payment Method'}
-                        </ThemedText>
-                        <Pressable onPress={() => setModalVisible(false)} className="p-2">
-                            <Ionicons name="close" size={24} color={colors.expense} />
-                        </Pressable>
-                    </View>
-
-                    <ScrollView
-                        showsVerticalScrollIndicator={false}
-                        keyboardShouldPersistTaps="handled"
-                        contentContainerStyle={{ paddingBottom: 24 }}
-                    >
-                        {/* Name Input */}
-                        <View className="mb-6">
-                            <ThemedText type="kicker" className="mb-2">
-                                Name
-                            </ThemedText>
-                            <TextInput
-                                value={name}
-                                onChangeText={setName}
-                                placeholder="e.g., Chase Bank, Cash Wallet"
-                                placeholderTextColor={colors.textMuted}
-                                className="w-full rounded-xl px-6 py-4 text-textPrimary dark:text-dark-textPrimary text-base font-semibold"
-                                style={{ backgroundColor: colors.backgroundAlt, fontFamily: 'PlusJakartaSans_600SemiBold' }}
-                            />
-                        </View>
-
-                        {/* Type Selection */}
-                        <View className="mb-6">
-                            <ThemedText type="kicker" className="mb-3">
-                                Type
-                            </ThemedText>
-                            <View className="flex-row flex-wrap gap-3">
-                                {ACCOUNT_TYPES.map((accountType) => (
-                                    <Pressable
-                                        key={accountType.value}
-                                        onPress={() => setType(accountType.value)}
-                                        className="px-5 py-3 rounded-xl flex-row items-center gap-2"
-                                        style={{ backgroundColor: type === accountType.value ? colors.primary : colors.backgroundAlt }}
-                                    >
-                                        <Ionicons
-                                            name={accountType.icon}
-                                            size={18}
-                                            color={type === accountType.value ? colors.white : colors.textMuted}
-                                        />
-                                        <ThemedText
-                                            className="text-sm font-bold"
-                                            style={{ color: type === accountType.value ? colors.white : colors.textPrimary }}
-                                        >
-                                            {accountType.label}
-                                        </ThemedText>
-                                    </Pressable>
-                                ))}
-                            </View>
-                        </View>
-
-                        {/* Balance Input */}
-                        <View className="mb-6">
-                            <ThemedText type="kicker" className="mb-2">
-                                Initial Balance
-                            </ThemedText>
-                            <TextInput
-                                value={balance}
-                                onChangeText={setBalance}
-                                placeholder="0.00"
-                                placeholderTextColor={colors.textMuted}
-                                keyboardType="decimal-pad"
-                                className="w-full rounded-xl px-6 py-4 text-textPrimary dark:text-dark-textPrimary text-base font-semibold"
-                                style={{ backgroundColor: colors.backgroundAlt, fontFamily: 'SpaceGrotesk_600SemiBold' }}
-                            />
-                        </View>
-
-                        {/* Icon Selection */}
-                        <View className="mb-6">
-                            <ThemedText type="kicker" className="mb-3">
-                                Icon
-                            </ThemedText>
-                            <View className="flex-row flex-wrap gap-3">
-                                {ACCOUNT_ICONS.map((icon) => (
-                                    <Pressable
-                                        key={icon}
-                                        onPress={() => setSelectedIcon(icon)}
-                                        className="w-14 h-14 rounded-xl items-center justify-center"
-                                        style={{ backgroundColor: selectedIcon === icon ? colors.primary : colors.backgroundAlt }}
-                                    >
-                                        <Ionicons
-                                            name={icon as IoniconsName}
-                                            size={24}
-                                            color={selectedIcon === icon ? colors.white : colors.textMuted}
-                                        />
-                                    </Pressable>
-                                ))}
-                            </View>
-                        </View>
-
-                        {/* Color Selection */}
-                        <View className="mb-8">
-                            <ThemedText type="kicker" className="mb-3">
-                                Color
-                            </ThemedText>
-                            <View className="flex-row flex-wrap gap-3">
-                                {ACCOUNT_COLORS.map((color) => (
-                                    <Pressable
-                                        key={color}
-                                        onPress={() => setSelectedColor(color)}
-                                        accessibilityRole="radio"
-                                        accessibilityState={{ selected: selectedColor === color }}
-                                        className="w-14 h-14 rounded-xl items-center justify-center"
-                                        style={{
-                                            backgroundColor: color,
-                                            borderWidth: selectedColor === color ? 3 : 0,
-                                            borderColor: colors.textPrimary,
-                                        }}
-                                    >
-                                        {selectedColor === color && (
-                                            <Ionicons name="checkmark" size={24} color={colors.white} />
-                                        )}
-                                    </Pressable>
-                                ))}
-                            </View>
-                        </View>
-
-                        <AppButton
-                            label={`${editingAccount ? 'Update' : 'Add'} Payment Method`}
-                            onPress={handleSave}
-                            loading={isSubmitting}
-                            disabled={isSubmitting}
-                        />
-                    </ScrollView>
-                </Animated.View>
-            </KeyboardAvoidingView>
-        </Modal>
-    );
-
     return (
         <View className="flex-1 bg-background dark:bg-dark-background">
-            <ScrollView
-                className="flex-1"
-                style={{ paddingTop: insets.top }}
-                contentContainerStyle={{ paddingBottom: 100 }}
-                contentInsetAdjustmentBehavior="automatic"
-            >
+            {/* Header stays put; only the content below it scrolls */}
+            <View style={{ paddingTop: insets.top }}>
                 <ScreenHeader
                     title="Accounts & Wallets"
                     right={
@@ -412,7 +183,11 @@ export default function PaymentMethodsScreen() {
                         </Pressable>
                     }
                 />
-
+            </View>
+            <ScrollView
+                className="flex-1"
+                contentContainerStyle={{ paddingBottom: 100 }}
+            >
                 {/* Payment Methods List */}
                 <View className="px-5">
                     {loading ? (
@@ -430,59 +205,27 @@ export default function PaymentMethodsScreen() {
                     ) : (
                         <View className="gap-4">
                             {accounts.map((account, index) => (
-                                <Animated.View
+                                <AccountRow
                                     key={account.id}
-                                    entering={FadeInDown.delay(index * 100).springify()}
-                                    className="bg-surface dark:bg-dark-surface border border-divider dark:border-dark-divider rounded-xl p-4"
-                                >
-                                    <View className="flex-row items-center">
-                                        <View className="w-12 h-12 items-center justify-center mr-4">
-                                            <Ionicons
-                                                name={(account.icon as IoniconsName) || 'wallet'}
-                                                size={28}
-                                                color={account.color || colors.primary}
-                                            />
-                                        </View>
-                                        <View className="flex-1">
-                                            <ThemedText className="text-lg font-bold mb-1">
-                                                {account.name}
-                                            </ThemedText>
-                                            <ThemedText className="text-sm text-textMuted capitalize mb-1">
-                                                {account.type}
-                                            </ThemedText>
-                                            <ThemedText className="text-base font-semibold text-primary" style={{ fontFamily: 'SpaceGrotesk_600SemiBold' }}>
-                                                {UserService.formatCurrency(account.balance, profile.currency)}
-                                            </ThemedText>
-                                        </View>
-                                        <View className="flex-row gap-2">
-                                            <Pressable
-                                                onPress={() => openEditModal(account)}
-                                                accessibilityRole="button"
-                                                accessibilityLabel={`Edit ${account.name}`}
-                                                className="w-10 h-10 rounded-xl items-center justify-center"
-                                                style={{ borderWidth: 1, borderColor: colors.borderStrong }}
-                                            >
-                                                <Ionicons name="create-outline" size={20} color={colors.primary} />
-                                            </Pressable>
-                                            <Pressable
-                                                onPress={() => handleDelete(account)}
-                                                accessibilityRole="button"
-                                                accessibilityLabel={`Delete ${account.name}`}
-                                                className="w-10 h-10 rounded-xl items-center justify-center"
-                                                style={{ borderWidth: 1, borderColor: colors.borderStrong }}
-                                            >
-                                                <Ionicons name="trash-outline" size={20} color={colors.expense} />
-                                            </Pressable>
-                                        </View>
-                                    </View>
-                                </Animated.View>
+                                    account={account}
+                                    index={index}
+                                    currency={profile.currency}
+                                    onEdit={openEditModal}
+                                    onDelete={handleDelete}
+                                />
                             ))}
                         </View>
                     )}
                 </View>
             </ScrollView>
 
-            {renderModal()}
+            <AccountFormModal
+                key={formKey}
+                visible={modalVisible}
+                editingAccount={editingAccount}
+                onClose={closeModal}
+                onSaved={handleSaved}
+            />
             {deletingAccount && (
                 <DeleteConfirmSheet
                     account={deletingAccount}

@@ -1,4 +1,4 @@
-import { useModals, type ModalType } from '@/providers/modal-context';
+import { useModalActions, type ModalType } from '@/providers/modal-context';
 import { useSegments } from 'expo-router';
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -28,7 +28,7 @@ export function useActiveTab(): string {
 }
 
 export function GlobalFab() {
-    const { openModal } = useModals();
+    const { openModal } = useModalActions();
     const insets = useSafeAreaInsets();
     const tab = useActiveTab();
     const action = FAB_ACTIONS[tab];

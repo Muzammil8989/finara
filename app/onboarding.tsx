@@ -4,6 +4,7 @@ import { useThemeColors } from '@/hooks/use-theme-colors';
 import { logger } from '@/lib/logger';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -122,6 +123,8 @@ export default function OnboardingScreen() {
 
     return (
         <View style={{ flex: 1, backgroundColor: tokens.brand.primary }}>
+            {/* Light icons over the dark teal header (overrides the root bar while mounted) */}
+            <StatusBar style="light" />
             <KeyboardAvoidingView
                 className="flex-1"
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

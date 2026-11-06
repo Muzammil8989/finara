@@ -16,7 +16,8 @@
  *   CTA shape    → rounded-xl = Shape.Large (16dp)
  */
 
-import React, { Component, ErrorInfo } from 'react';
+import React, { Component, ErrorInfo, useEffect } from 'react';
+import * as SplashScreen from 'expo-splash-screen';
 import { ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton, ThemedText } from '@/components/common';
@@ -35,6 +36,12 @@ interface ErrorFallbackProps {
 }
 
 function ErrorFallback({ onReset, error, componentStack }: ErrorFallbackProps) {
+  // A crash during startup happens while the native splash is still up;
+  // without this the fallback renders hidden behind it and the app looks frozen.
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
   const message = error?.message ?? 'Unknown error';
   const stack = error?.stack ?? '';
 

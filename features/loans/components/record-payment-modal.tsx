@@ -16,6 +16,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface RecordPaymentModalProps {
   visible: boolean;
@@ -27,6 +28,7 @@ interface RecordPaymentModalProps {
 }
 
 export function RecordPaymentModal({ visible, onClose, onSuccess, loan, currencyCode, categoryIds }: RecordPaymentModalProps) {
+  const insets = useSafeAreaInsets();
   const colors = useThemeColors();
   const currencySymbol = POPULAR_CURRENCIES.find(c => c.code === currencyCode)?.symbol ?? '$';
   const sheetRef = useRef<BottomSheetRef>(null);
@@ -105,7 +107,7 @@ export function RecordPaymentModal({ visible, onClose, onSuccess, loan, currency
       maxHeight="85%"
       paddingHorizontal={28}
       paddingTop={48}
-      paddingBottom={64}
+      paddingBottom={insets.bottom + 32}
       gradientColors={[`${colors.success}14`, `${colors.success}05`, 'transparent']}
       keyboardAvoiding
     >
@@ -119,7 +121,7 @@ export function RecordPaymentModal({ visible, onClose, onSuccess, loan, currency
             {isGiven ? `From ${loan.person_name}` : `To ${loan.person_name}`}
           </ThemedText>
         </View>
-        <Pressable onPress={handleClose} className="p-2">
+        <Pressable onPress={handleClose} className="p-2" hitSlop={4} accessibilityRole="button" accessibilityLabel="Close">
           <Ionicons name="close" size={24} color={colors.textMuted} />
         </Pressable>
       </View>

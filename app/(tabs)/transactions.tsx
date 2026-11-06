@@ -1,18 +1,18 @@
-import { parseLocalDate } from '@/lib/utils/date';
+import { parseLocalDate, toISODateString } from '@/lib/utils/date';
 import { EditTransactionModal } from '@/features/transactions/components/edit-transaction-modal';
 import { EmptyState, ErrorRetry, Skeleton, ThemedText } from '@/components/common';
-import { useModals } from '@/providers/modal-context';
+import { useModalActions } from '@/providers/modal-context';
 import { useUser } from '@/features/user/context/user-context';
 import { UserService } from '@/features/user/services/user-service';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useCategories } from '@/features/categories/hooks/use-categories';
-import { Transaction, TransactionFilters, useTransactions } from '@/features/transactions/hooks/use-transactions';
-import { deleteTransaction, isTransferCategory } from '@/lib/db/queries';
+import { Transaction, TransactionFilters, UseTransactionsOptions, useTransactions } from '@/features/transactions/hooks/use-transactions';
+import { deleteTransaction } from '@/lib/db/queries';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshControl, SectionList, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, SectionList, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActivityHeader } from '@/features/transactions/components/activity-header';
@@ -22,6 +22,12 @@ import { TransactionActionSheet } from '@/features/transactions/components/trans
 import { TransactionDeleteSheet } from '@/features/transactions/components/transaction-delete-sheet';
 import { TransactionRow } from '@/features/transactions/components/transaction-row';
 import { TimeFilter, getDateRange } from '@/features/transactions/utils';
+
+/** One formatter for every day label (constructing one per row is slow on Hermes). */
+const DAY_LABEL = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long' });
+
+/** Paged list (50 rows, more on scroll) with SQL totals for the header. */
+const LIST_OPTIONS: UseTransactionsOptions = { withTotals: true };
 
 function TransactionRowSkeleton() {
     return (
@@ -48,7 +54,7 @@ export default function TransactionsScreen() {
     const { profile } = useUser();
     const insets = useSafeAreaInsets();
     const colors = useThemeColors();
-    const { triggerRefresh } = useModals();
+    const { triggerRefresh } = useModalActions();
     const { categories } = useCategories();
 
     // ── Filter state ──────────────────────────────────────────
@@ -102,24 +108,28 @@ export default function TransactionsScreen() {
         return filters;
     }, [debouncedSearch, selectedCategoryId, activeTimeFilter, customStartDate, customEndDate]);
 
-    const { transactions, loading, error, refresh } = useTransactions(dbFilters);
+    const { transactions, totals, loading, loadingMore, hasMore, loadMore, error, refresh } = useTransactions(dbFilters, LIST_OPTIONS);
 
     // (Initial fetch is deferred inside the useTransactions hook itself.)
 
     // ── Grouped sections ──────────────────────────────────────
     const sections = useMemo(() => {
         const grouped: { [key: string]: Transaction[] } = {};
+        const titles = new Map<string, string>();
         const now = new Date();
-        const today = now.toDateString();
+        const today = toISODateString(now);
         // Calendar arithmetic, not "now - 24h" (wrong across DST changes).
-        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).toDateString();
+        const yesterday = toISODateString(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
         transactions.forEach(t => {
-            // Parse YYYY-MM-DD as a local date; new Date('2025-03-10') is UTC
-            // midnight, i.e. the previous day for anyone west of UTC.
-            const date = t.date ? parseLocalDate(t.date) : now;
-            const formatted = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
-            const ds = date.toDateString();
-            const title = ds === today ? `Today, ${formatted}` : ds === yesterday ? `Yesterday, ${formatted}` : formatted;
+            const day = t.date ?? today;
+            let title = titles.get(day);
+            if (title === undefined) {
+                // Parse YYYY-MM-DD as a local date; new Date('2025-03-10') is UTC
+                // midnight, i.e. the previous day for anyone west of UTC.
+                const formatted = DAY_LABEL.format(parseLocalDate(day));
+                title = day === today ? `Today, ${formatted}` : day === yesterday ? `Yesterday, ${formatted}` : formatted;
+                titles.set(day, title);
+            }
             if (!grouped[title]) grouped[title] = [];
             grouped[title].push(t);
         });
@@ -131,14 +141,13 @@ export default function TransactionsScreen() {
     }, [transactions]);
 
     // ── Summary ───────────────────────────────────────────────
-    const summary = useMemo(() => {
-        let income = 0; let expense = 0;
-        transactions.forEach(t => {
-            if (isTransferCategory(t.category)) return; // lending/borrowing isn't income or spending
-            if (t.type === 'income') income += t.amount; else expense += t.amount;
-        });
-        return { income, expense };
-    }, [transactions]);
+    // Totalled in SQL over every matching row, not just the loaded pages
+    // (transfers are left out of income and spending).
+    const summary = totals ?? { income: 0, expense: 0, count: 0 };
+
+    const handleEndReached = useCallback(() => {
+        if (hasMore && !loadingMore && !loading) loadMore();
+    }, [hasMore, loadingMore, loading, loadMore]);
 
     // ── Delete handler ────────────────────────────────────────
     const handleConfirmDelete = useCallback(async () => {
@@ -149,7 +158,7 @@ export default function TransactionsScreen() {
             // Also removes linked household / loan records in the same DB transaction.
             await deleteTransaction(deletingTransaction.id);
             setDeletingTransaction(null);
-            refresh();
+            // Refreshes this list too (it listens for transaction refreshes).
             triggerRefresh();
         } catch (e) {
             logger.error('Failed to delete transaction', e);
@@ -157,7 +166,7 @@ export default function TransactionsScreen() {
         } finally {
             setIsDeleting(false);
         }
-    }, [deletingTransaction, refresh, triggerRefresh]);
+    }, [deletingTransaction, triggerRefresh]);
 
     const showSkeleton = loading && sections.length === 0;
 
@@ -193,7 +202,8 @@ export default function TransactionsScreen() {
     ), [colors, profile.currency]);
 
     return (
-        <View className="flex-1 bg-background dark:bg-dark-background">
+        // The status bar area stays solid; the list (header included) scrolls below it.
+        <View className="flex-1 bg-background dark:bg-dark-background" style={{ paddingTop: insets.top }}>
             <SectionList
                 sections={sections}
                 keyExtractor={item => item.id.toString()}
@@ -203,6 +213,15 @@ export default function TransactionsScreen() {
                 updateCellsBatchingPeriod={50}
                 initialNumToRender={10}
                 windowSize={5}
+                onEndReached={handleEndReached}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={
+                    loadingMore ? (
+                        <View style={{ paddingVertical: 20 }}>
+                            <ActivityIndicator color={colors.primary} accessibilityLabel="Loading more transactions" />
+                        </View>
+                    ) : null
+                }
                 contentContainerStyle={{ paddingBottom: 150 }}
                 refreshControl={
                     <RefreshControl
@@ -214,7 +233,7 @@ export default function TransactionsScreen() {
                 }
                 ListHeaderComponent={
                     <ActivityHeader
-                        insets={insets}
+                        insets={{ top: 0 }}
                         searchQuery={searchQuery}
                         onSearchChange={setSearchQuery}
                         activeTimeFilter={activeTimeFilter}
@@ -226,7 +245,7 @@ export default function TransactionsScreen() {
                         income={summary.income}
                         expense={summary.expense}
                         currency={profile.currency}
-                        count={loading && transactions.length === 0 ? undefined : transactions.length}
+                        count={totals === null ? undefined : totals.count}
                     />
                 }
                 renderSectionHeader={renderSectionHeader}
@@ -277,7 +296,7 @@ export default function TransactionsScreen() {
                 visible={!!editingTransaction}
                 transaction={editingTransaction}
                 onClose={() => setEditingTransaction(null)}
-                onSuccess={() => { refresh(); triggerRefresh(); }}
+                onSuccess={() => triggerRefresh()}
             />
 
             {actionTransaction && (

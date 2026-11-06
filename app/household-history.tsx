@@ -11,8 +11,8 @@ import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
 import { UserService } from '@/features/user/services/user-service';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, ListRenderItem, Pressable, View } from 'react-native';
 import Animated, { Easing, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -38,7 +38,9 @@ function formatRange(startISO: string, endISO: string): string {
     return `${MONTH_NAMES[sm - 1]} ${sd} – ${MONTH_NAMES[em - 1]} ${ed}, ${ey}`;
 }
 
-function HistoryRow({
+const keyExtractor = (entry: HouseholdPeriodHistory) => String(entry.id);
+
+const HistoryRow = memo(function HistoryRow({
     entry,
     currencyCode,
     onDelete,
@@ -136,7 +138,7 @@ function HistoryRow({
             )}
         </View>
     );
-}
+});
 
 export default function HouseholdHistoryScreen() {
     const colors = useThemeColors();
@@ -148,7 +150,10 @@ export default function HouseholdHistoryScreen() {
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<HistoryFilter>('all');
 
-    const filtered = filter === 'all' ? entries : entries.filter(e => e.period === filter);
+    const filtered = useMemo(
+        () => (filter === 'all' ? entries : entries.filter(e => e.period === filter)),
+        [entries, filter],
+    );
 
     const load = useCallback(async () => {
         if (!isDbReady()) return;
@@ -168,7 +173,7 @@ export default function HouseholdHistoryScreen() {
         load();
     }, [load]);
 
-    const handleDelete = async (entry: HouseholdPeriodHistory) => {
+    const handleDelete = useCallback(async (entry: HouseholdPeriodHistory) => {
         try {
             await deleteHouseholdHistoryEntry(entry.id);
             toast.success('History entry removed');
@@ -177,33 +182,37 @@ export default function HouseholdHistoryScreen() {
             logger.error('HouseholdHistoryScreen: delete failed', e);
             toast.error('Failed to delete entry');
         }
-    };
+    }, [load]);
+
+    const renderRow = useCallback<ListRenderItem<HouseholdPeriodHistory>>(({ item }) => (
+        <View className="px-5">
+            <HistoryRow entry={item} currencyCode={currencyCode} onDelete={handleDelete} />
+        </View>
+    ), [currencyCode, handleDelete]);
+
+    const hasEntries = !loading && entries.length > 0;
 
     return (
         <View className="flex-1 bg-background dark:bg-dark-background">
 
-            <ScrollView
+            {/* Header stays put; only the content below it scrolls */}
+            <View style={{ paddingTop: insets.top }}>
+                <ScreenHeader title="Household History" subtitle="Past budget periods" />
+            </View>
+            {/* Single scroller: filter chips are the list header, periods are virtualized rows */}
+            <FlatList
                 className="flex-1"
-                style={{ paddingTop: insets.top }}
+                data={hasEntries ? filtered : []}
+                keyExtractor={keyExtractor}
+                renderItem={renderRow}
                 contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
                 showsVerticalScrollIndicator={false}
-            >
-                <ScreenHeader title="Household History" subtitle="Past budget periods" />
-
-                <View className="px-5">
-                    {loading ? (
-                        <View className="py-24 items-center">
-                            <ActivityIndicator size="large" color={colors.primary} />
-                        </View>
-                    ) : entries.length === 0 ? (
-                        <EmptyState
-                            icon="time-outline"
-                            title="No History Yet"
-                            subtitle={`Past periods will appear here\nonce a cycle ends.`}
-                            iconColor={colors.primary}
-                        />
-                    ) : (
-                        <Animated.View entering={FadeInDown.duration(350).easing(Easing.out(Easing.cubic))}>
+                ListHeaderComponent={
+                    hasEntries ? (
+                        <Animated.View
+                            style={{ paddingHorizontal: 20 }}
+                            entering={FadeInDown.duration(350).easing(Easing.out(Easing.cubic))}
+                        >
                             {/* Period filter chips */}
                             <View className="flex-row gap-2 mb-4">
                                 {FILTERS.map(f => {
@@ -238,28 +247,33 @@ export default function HouseholdHistoryScreen() {
                                     {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}
                                 </ThemedText>
                             </View>
-
-                            {filtered.length === 0 ? (
-                                <View className="py-16 items-center">
-                                    <Ionicons name="funnel-outline" size={28} color={colors.textMuted} />
-                                    <ThemedText className="text-sm font-medium mt-3 text-textMuted dark:text-dark-textMuted">
-                                        No {PERIOD_LABELS[filter]?.toLowerCase() ?? ''} periods yet
-                                    </ThemedText>
-                                </View>
-                            ) : (
-                                filtered.map(entry => (
-                                    <HistoryRow
-                                        key={entry.id}
-                                        entry={entry}
-                                        currencyCode={currencyCode}
-                                        onDelete={handleDelete}
-                                    />
-                                ))
-                            )}
                         </Animated.View>
-                    )}
-                </View>
-            </ScrollView>
+                    ) : null
+                }
+                ListEmptyComponent={
+                    <View className="px-5">
+                        {loading ? (
+                            <View className="py-24 items-center">
+                                <ActivityIndicator size="large" color={colors.primary} />
+                            </View>
+                        ) : entries.length === 0 ? (
+                            <EmptyState
+                                icon="time-outline"
+                                title="No History Yet"
+                                subtitle={`Past periods will appear here\nonce a cycle ends.`}
+                                iconColor={colors.primary}
+                            />
+                        ) : (
+                            <View className="py-16 items-center">
+                                <Ionicons name="funnel-outline" size={28} color={colors.textMuted} />
+                                <ThemedText className="text-sm font-medium mt-3 text-textMuted dark:text-dark-textMuted">
+                                    No {PERIOD_LABELS[filter]?.toLowerCase() ?? ''} periods yet
+                                </ThemedText>
+                            </View>
+                        )}
+                    </View>
+                }
+            />
         </View>
     );
 }

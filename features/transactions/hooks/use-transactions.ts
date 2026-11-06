@@ -2,11 +2,11 @@ import { todayString } from '@/lib/utils/date';
 import { getDb } from '@/lib/db/db-client';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
-import { createTransaction } from '@/lib/db/queries';
+import { createTransaction, TRANSFER_CATEGORY_NAMES } from '@/lib/db/queries';
 import { NotificationService } from '@/features/notifications/services/notification-service';
-import { useModals } from '@/providers/modal-context';
+import { useRefreshSignal, type RefreshDomain } from '@/providers/modal-context';
 import { accounts, categories, transactions as transactionsTable } from '@/lib/db/schema';
-import { and, desc, eq, gte, lte, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, lt, lte, or, sql, type SQL } from 'drizzle-orm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { InteractionManager } from 'react-native';
 
@@ -41,12 +41,158 @@ export interface TransactionFilters {
     endDate?: string;
 }
 
-export function useTransactions(filters?: TransactionFilters) {
+export interface UseTransactionsOptions {
+    /** Load at most this many newest rows, no pagination (e.g. 5 for Home). */
+    limit?: number;
+    /**
+     * Keyset pagination (default true): the first page loads, `loadMore`
+     * fetches the next. false loads the whole filtered range in one go —
+     * only for callers whose filters bound the range.
+     */
+    paginate?: boolean;
+    /** Rows per page when paginating. Default 50. */
+    pageSize?: number;
+    /** Also total the whole filtered set in SQL (not just loaded pages). */
+    withTotals?: boolean;
+}
+
+/** Income / spending (transfers excluded) and row count over every filtered row. */
+export interface TransactionTotals {
+    income: number;
+    expense: number;
+    count: number;
+}
+
+export const DEFAULT_PAGE_SIZE = 50;
+const REFRESH_DOMAINS = ['transactions'] as const satisfies readonly RefreshDomain[];
+
+type Cursor = { date: string; id: number };
+
+function buildWhere(filters?: TransactionFilters): SQL | undefined {
+    return and(
+        filters?.searchQuery
+            ? or(
+                sql`${transactionsTable.notes} LIKE ${likePattern(filters.searchQuery)} ESCAPE '\\'`,
+                sql`${categories.name} LIKE ${likePattern(filters.searchQuery)} ESCAPE '\\'`
+            )
+            : undefined,
+        filters?.categoryId ? eq(transactionsTable.category_id, filters.categoryId) : undefined,
+        filters?.categoryName ? eq(categories.name, filters.categoryName) : undefined,
+        filters?.type ? eq(transactionsTable.type, filters.type) : undefined,
+        filters?.startDate ? gte(transactionsTable.date, filters.startDate) : undefined,
+        filters?.endDate ? lte(transactionsTable.date, filters.endDate) : undefined
+    );
+}
+
+/** Rows matching `where`, newest first (date DESC, id DESC — the keyset order). */
+async function selectRows(where: SQL | undefined, limit?: number): Promise<Transaction[]> {
+    const query = getDb()
+        .select({
+            id: transactionsTable.id,
+            category_id: transactionsTable.category_id,
+            account_id: transactionsTable.account_id,
+            amount: transactionsTable.amount,
+            note: transactionsTable.notes,
+            type: transactionsTable.type,
+            recurringId: transactionsTable.recurring_id,
+            date: transactionsTable.date,
+            categoryName: categories.name,
+            categoryIcon: categories.icon,
+            categoryColor: categories.color,
+            paymentMethod: categories.payment_method,
+            accountName: accounts.name,
+        })
+        .from(transactionsTable)
+        .leftJoin(categories, eq(transactionsTable.category_id, categories.id))
+        .leftJoin(accounts, eq(transactionsTable.account_id, accounts.id))
+        .where(where)
+        .orderBy(desc(transactionsTable.date), desc(transactionsTable.id))
+        .$dynamic();
+    const result = await (limit !== undefined ? query.limit(limit) : query);
+
+    return result.map((t) => ({
+        id: t.id,
+        category_id: t.category_id,
+        account_id: t.account_id,
+        amount: t.amount,
+        category: t.categoryName || 'Uncategorized',
+        categoryIcon: t.categoryIcon || undefined,
+        categoryColor: t.categoryColor || undefined,
+        paymentMethod: t.paymentMethod || undefined,
+        note: t.note,
+        recurringId: t.recurringId ?? null,
+        type: t.type as 'income' | 'expense',
+        date: t.date,
+        accountName: t.accountName || undefined,
+    }));
+}
+
+/** Rows strictly after `cursor` in (date DESC, id DESC) order. */
+const after = (cursor: Cursor) =>
+    sql`(${transactionsTable.date}, ${transactionsTable.id}) < (${cursor.date}, ${cursor.id})`;
+
+/**
+ * One keyset page of at least `size` rows. A page that ends mid-day is
+ * extended to the end of that day, so day groups (and their nets) are never
+ * split across pages. `hasMore` says whether anything follows.
+ */
+export async function fetchTransactionPage(
+    filters: TransactionFilters | undefined,
+    cursor: Cursor | null,
+    size: number
+): Promise<{ rows: Transaction[]; hasMore: boolean }> {
+    const base = buildWhere(filters);
+    const rows = await selectRows(and(base, cursor ? after(cursor) : undefined), size);
+    if (rows.length < size) return { rows, hasMore: false };
+
+    const last = rows[rows.length - 1];
+    if (last.date) {
+        const restOfDay = await selectRows(
+            and(base, eq(transactionsTable.date, last.date), lt(transactionsTable.id, last.id))
+        );
+        rows.push(...restOfDay);
+    }
+    const end = rows[rows.length - 1];
+    const probe = end.date ? await selectRows(and(base, after({ date: end.date, id: end.id })), 1) : [];
+    return { rows, hasMore: probe.length > 0 };
+}
+
+/** SQL totals over every row matching the filters (transfers left out of income/spending). */
+export async function fetchTransactionTotals(filters?: TransactionFilters): Promise<TransactionTotals> {
+    const isTransfer = inArray(categories.name, [...TRANSFER_CATEGORY_NAMES]);
+    const [row] = await getDb()
+        .select({
+            income: sql<number>`sum(case when ${isTransfer} then 0 when ${transactionsTable.type} = 'income' then ${transactionsTable.amount} else 0 end)`,
+            expense: sql<number>`sum(case when ${isTransfer} then 0 when ${transactionsTable.type} = 'expense' then ${transactionsTable.amount} else 0 end)`,
+            count: count(),
+        })
+        .from(transactionsTable)
+        .leftJoin(categories, eq(transactionsTable.category_id, categories.id))
+        .where(buildWhere(filters));
+    return { income: Number(row?.income) || 0, expense: Number(row?.expense) || 0, count: Number(row?.count) || 0 };
+}
+
+export function useTransactions(filters?: TransactionFilters, options?: UseTransactionsOptions) {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [totals, setTotals] = useState<TransactionTotals | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(false);
     const [error, setError] = useState<Error | null>(null);
     const mountedRef = useRef(true);
-    const { refreshSignal } = useModals();
+    const refreshSignal = useRefreshSignal(REFRESH_DOMAINS);
+
+    // Latest rows / request generation, read by loadMore without re-creating it.
+    const rowsRef = useRef<Transaction[]>([]);
+    const hasMoreRef = useRef(false);
+    const busyRef = useRef(false);
+    const generationRef = useRef(0);
+    const filterKeyRef = useRef<string | null>(null);
+
+    const limit = options?.limit;
+    const paginate = limit === undefined && options?.paginate !== false;
+    const pageSize = options?.pageSize ?? DEFAULT_PAGE_SIZE;
+    const withTotals = !!options?.withTotals;
 
     useEffect(() => {
         mountedRef.current = true;
@@ -54,87 +200,86 @@ export function useTransactions(filters?: TransactionFilters) {
     }, []);
 
     const fetchTransactions = useCallback(async () => {
+        const current: TransactionFilters = {
+            searchQuery: filters?.searchQuery,
+            categoryId: filters?.categoryId,
+            categoryName: filters?.categoryName,
+            type: filters?.type,
+            startDate: filters?.startDate,
+            endDate: filters?.endDate,
+        };
+        // Same filters (a refresh): reload as many rows as are already shown,
+        // so the list doesn't collapse back to one page. New filters: one page.
+        const filterKey = JSON.stringify(current);
+        const sameFilters = filterKeyRef.current === filterKey;
+        filterKeyRef.current = filterKey;
+        const generation = ++generationRef.current;
+
         try {
             setLoading(true);
             setError(null);
-            const db = getDb();
 
-            const result = await db
-                .select({
-                    id: transactionsTable.id,
-                    category_id: transactionsTable.category_id,
-                    account_id: transactionsTable.account_id,
-                    amount: transactionsTable.amount,
-                    note: transactionsTable.notes,
-                    type: transactionsTable.type,
-                    recurringId: transactionsTable.recurring_id,
-                    date: transactionsTable.date,
-                    categoryName: categories.name,
-                    categoryIcon: categories.icon,
-                    categoryColor: categories.color,
-                    paymentMethod: categories.payment_method,
-                    accountName: accounts.name,
-                })
-                .from(transactionsTable)
-                .leftJoin(categories, eq(transactionsTable.category_id, categories.id))
-                .leftJoin(accounts, eq(transactionsTable.account_id, accounts.id))
-                .where(
-                    and(
-                        filters?.searchQuery
-                            ? or(
-                                sql`${transactionsTable.notes} LIKE ${likePattern(filters.searchQuery)} ESCAPE '\\'`,
-                                sql`${categories.name} LIKE ${likePattern(filters.searchQuery)} ESCAPE '\\'`
-                            )
-                            : undefined,
-                        filters?.categoryId
-                            ? eq(transactionsTable.category_id, filters.categoryId)
-                            : undefined,
-                        filters?.categoryName
-                            ? eq(categories.name, filters.categoryName)
-                            : undefined,
-                        filters?.type
-                            ? eq(transactionsTable.type, filters.type)
-                            : undefined,
-                        filters?.startDate
-                            ? gte(transactionsTable.date, filters.startDate)
-                            : undefined,
-                        filters?.endDate
-                            ? lte(transactionsTable.date, filters.endDate)
-                            : undefined
-                    )
-                )
-                .orderBy(desc(transactionsTable.date), desc(transactionsTable.id));
+            const [page, sums] = await Promise.all([
+                paginate
+                    ? fetchTransactionPage(current, null, Math.max(pageSize, sameFilters ? rowsRef.current.length : 0))
+                    : selectRows(buildWhere(current), limit).then(rows => ({ rows, hasMore: false })),
+                withTotals ? fetchTransactionTotals(current) : Promise.resolve(null),
+            ]);
 
-            if (!mountedRef.current) return;
+            if (!mountedRef.current || generation !== generationRef.current) return;
 
-            const mappedTransactions: Transaction[] = result.map((t) => ({
-                id: t.id,
-                category_id: t.category_id,
-                account_id: t.account_id,
-                amount: t.amount,
-                category: t.categoryName || 'Uncategorized',
-                categoryIcon: t.categoryIcon || undefined,
-                categoryColor: t.categoryColor || undefined,
-                paymentMethod: t.paymentMethod || undefined,
-                note: t.note,
-                recurringId: t.recurringId ?? null,
-                type: t.type as 'income' | 'expense',
-                date: t.date,
-                accountName: t.accountName || undefined,
-            }));
-
-            setTransactions(mappedTransactions);
+            rowsRef.current = page.rows;
+            hasMoreRef.current = page.hasMore;
+            setTransactions(page.rows);
+            setHasMore(page.hasMore);
+            setTotals(sums);
         } catch (e) {
             logger.error('Failed to fetch transactions', e);
-            if (mountedRef.current) {
+            if (mountedRef.current && generation === generationRef.current) {
                 setError(e instanceof Error ? e : new Error('Failed to fetch transactions'));
             }
         } finally {
-            if (mountedRef.current) {
+            if (mountedRef.current && generation === generationRef.current) {
                 setLoading(false);
             }
         }
-    }, [filters?.searchQuery, filters?.categoryId, filters?.categoryName, filters?.type, filters?.startDate, filters?.endDate]);
+    }, [filters?.searchQuery, filters?.categoryId, filters?.categoryName, filters?.type, filters?.startDate, filters?.endDate, paginate, pageSize, limit, withTotals]);
+
+    /** Append the next page. No-op while loading, or when everything is loaded. */
+    const loadMore = useCallback(async () => {
+        const rows = rowsRef.current;
+        const last = rows[rows.length - 1];
+        if (!paginate || !hasMoreRef.current || busyRef.current || !last?.date) return;
+        const generation = generationRef.current;
+        busyRef.current = true;
+        setLoadingMore(true);
+        try {
+            const page = await fetchTransactionPage(
+                {
+                    searchQuery: filters?.searchQuery,
+                    categoryId: filters?.categoryId,
+                    categoryName: filters?.categoryName,
+                    type: filters?.type,
+                    startDate: filters?.startDate,
+                    endDate: filters?.endDate,
+                },
+                { date: last.date, id: last.id },
+                pageSize
+            );
+            // Filters changed or a refresh started meanwhile: this page is stale.
+            if (!mountedRef.current || generation !== generationRef.current) return;
+            const next = rows.concat(page.rows);
+            rowsRef.current = next;
+            hasMoreRef.current = page.hasMore;
+            setTransactions(next);
+            setHasMore(page.hasMore);
+        } catch (e) {
+            logger.error('Failed to load more transactions', e);
+        } finally {
+            busyRef.current = false;
+            if (mountedRef.current) setLoadingMore(false);
+        }
+    }, [filters?.searchQuery, filters?.categoryId, filters?.categoryName, filters?.type, filters?.startDate, filters?.endDate, paginate, pageSize]);
 
     const addTransaction = async (tx: Omit<Transaction, 'id' | 'date' | 'accountName'> & { account_id?: number }): Promise<boolean> => {
         try {
@@ -194,5 +339,5 @@ export function useTransactions(filters?: TransactionFilters) {
         return () => task.cancel();
     }, [fetchTransactions, refreshSignal]);
 
-    return { transactions, addTransaction, refresh: fetchTransactions, loading, error };
+    return { transactions, totals, addTransaction, refresh: fetchTransactions, loadMore, hasMore, loadingMore, loading, error };
 }

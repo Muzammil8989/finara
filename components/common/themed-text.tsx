@@ -86,7 +86,22 @@ const FAMILY_BY_WEIGHT: Record<'sans' | 'serif' | 'figure', Record<string, strin
   figure: { thin: fonts.figure, light: fonts.figure, normal: fonts.figure, medium: fonts.figure, semibold: fonts.figureSemiBold, bold: fonts.figureBold, extrabold: fonts.figureBold, black: fonts.figureBold },
 };
 
+// Every text node resolves its weight on each render; the set of distinct
+// (type, className) pairs in the app is small, so cache the parsed result.
+const resolvedCache = new Map<string, { className: string; fontFamily: string }>();
+
 function resolveWeight(classes: string, type: string): { className: string; fontFamily: string } {
+  const key = `${type}|${classes}`;
+  let resolved = resolvedCache.get(key);
+  if (!resolved) {
+    resolved = parseWeight(classes, type);
+    if (resolvedCache.size > 500) resolvedCache.clear();
+    resolvedCache.set(key, resolved);
+  }
+  return resolved;
+}
+
+function parseWeight(classes: string, type: string): { className: string; fontFamily: string } {
   let weight: string | null = null;
   const kept: string[] = [];
   for (const token of classes.split(/\s+/)) {

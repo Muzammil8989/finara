@@ -111,6 +111,13 @@ export const transactions = sqliteTable(
     index('idx_transactions_recurring_id').on(table.recurring_id),
     // Index for account filtering
     index('idx_transactions_account_id').on(table.account_id),
+    // v10: transfer pairs and savings-goal movements
+    index('idx_transactions_transfer_group').on(table.transfer_group),
+    index('idx_transactions_savings_goal_id').on(table.savings_goal_id),
+    // v11 covering indexes: budget spend by category, totals by date, balances by account
+    index('idx_transactions_category_type_date_amount').on(table.category_id, table.type, table.date, table.amount),
+    index('idx_transactions_type_date_amount').on(table.type, table.date, table.amount),
+    index('idx_transactions_account_type_amount').on(table.account_id, table.type, table.amount),
     // Ensure amount is positive (logic should validate, but database ensures)
     check('check_amount_positive', sql`amount > 0`),
   ]
@@ -164,6 +171,8 @@ export const recurringExpenses = sqliteTable(
     index('idx_recurring_active_dates').on(table.is_active, table.start_date),
     // Index for account filtering
     index('idx_recurring_account_id').on(table.account_id),
+    // Index for category lookups (category delete checks)
+    index('idx_recurring_category_id').on(table.category_id),
     // Ensure amount is positive
     check('check_recurring_amount_positive', sql`amount > 0`),
   ]
@@ -277,6 +286,7 @@ export const householdExpenses = sqliteTable(
   (table) => [
     index('idx_household_expenses_date').on(table.date),
     index('idx_household_expenses_category_id').on(table.category_id),
+    index('idx_household_expenses_linked_transaction_id').on(table.linked_transaction_id),
     check('check_household_expense_amount_positive', sql`amount > 0`),
   ]
 );
@@ -333,6 +343,8 @@ export const loans = sqliteTable(
     index('idx_loans_type').on(table.type),
     index('idx_loans_is_settled').on(table.is_settled),
     index('idx_loans_account_id').on(table.account_id),
+    index('idx_loans_origin_transaction_id').on(table.origin_transaction_id),
+    index('idx_loans_transaction_id').on(table.transaction_id),
     check('check_loan_amount_positive', sql`amount > 0`),
   ]
 );
@@ -357,6 +369,7 @@ export const loanPayments = sqliteTable(
   },
   (table) => [
     index('idx_loan_payments_loan_id').on(table.loan_id),
+    index('idx_loan_payments_transaction_id').on(table.transaction_id),
     check('check_loan_payment_amount_positive', sql`amount > 0`),
   ]
 );

@@ -18,6 +18,7 @@ import {
     TextInput,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { toLocalDateStr } from '@/components/common/calendar-picker';
 
 interface TransferModalProps {
@@ -29,6 +30,7 @@ interface TransferModalProps {
 }
 
 export function TransferModal({ visible, onClose, onSuccess, remaining, currencyCode }: TransferModalProps) {
+    const insets = useSafeAreaInsets();
     const colors = useThemeColors();
     const { accounts, refresh: refreshAccounts } = useAccounts();
     const currencySymbol = POPULAR_CURRENCIES.find(c => c.code === currencyCode)?.symbol ?? '$';
@@ -108,13 +110,13 @@ export function TransferModal({ visible, onClose, onSuccess, remaining, currency
             maxHeight="90%"
             paddingHorizontal={32}
             paddingTop={48}
-            paddingBottom={64}
+            paddingBottom={insets.bottom + 32}
             gradientColors={['rgba(16,185,129,0.16)', 'rgba(16,185,129,0.04)', 'transparent']}
             keyboardAvoiding
         >
             <View className="flex-row items-center justify-between mb-2">
                 <ThemedText className="text-xl font-black">Transfer to Account</ThemedText>
-                <Pressable onPress={handleClose} className="p-2">
+                <Pressable onPress={handleClose} className="p-2" hitSlop={4} accessibilityRole="button" accessibilityLabel="Close">
                     <Ionicons name="close" size={24} color={colors.expense} />
                 </Pressable>
             </View>

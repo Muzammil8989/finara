@@ -162,11 +162,13 @@ export const SecurityService = {
 
     async isSecurityConfigured(): Promise<boolean> {
         try {
-            const pin = await SecureStore.getItemAsync(PIN_KEY);
-            if (pin) return true;
+            // Read both at once: this is on the cold-start path.
+            const [pin, bioPref] = await Promise.all([
+                SecureStore.getItemAsync(PIN_KEY),
+                SecureStore.getItemAsync(BIO_ENABLED_KEY),
+            ]);
             // biometric-only counts as configured even without a PIN
-            const bioPref = await SecureStore.getItemAsync(BIO_ENABLED_KEY);
-            return bioPref === 'true';
+            return !!pin || bioPref === 'true';
         } catch (error) {
             logger.error('Failed to check security config', error);
             return false;

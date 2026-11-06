@@ -11,8 +11,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Switch, View } from 'react-native';
 import { Pressable } from '@/components/common/pressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { exportExcel } from '../services/excel-export';
-import { exportPdf } from '../services/pdf-export';
 import { ALL_SECTIONS, buildReportData, type ReportSections } from '../services/report-data';
 
 type Format = 'pdf' | 'xlsx';
@@ -68,8 +66,14 @@ export function ExportSheet({ visible, onClose }: ExportSheetProps) {
                 toast.error('Nothing recorded in this period to export');
                 return;
             }
-            if (format === 'pdf') await exportPdf(data, period);
-            else await exportExcel(data);
+            // Loaded on demand so SheetJS (~1 MB) and expo-print aren't evaluated at app start.
+            if (format === 'pdf') {
+                const { exportPdf } = await import('../services/pdf-export');
+                await exportPdf(data, period);
+            } else {
+                const { exportExcel } = await import('../services/excel-export');
+                await exportExcel(data);
+            }
             toast.success(format === 'pdf' ? 'PDF report ready' : 'Excel workbook ready');
             handleClose();
         } catch (e) {

@@ -14,7 +14,7 @@
 import { EmptyState, IconSymbol, ProgressRing, Section, Skeleton, StatFigure, ThemedText } from '@/components/common';
 import { useAccounts } from '@/features/accounts/hooks/use-accounts';
 import { BudgetCard } from '@/features/budgets/components/budget-card';
-import { useBudgets } from '@/features/budgets/hooks/use-budgets';
+import { useBudgets, type BudgetWithSpend } from '@/features/budgets/hooks/use-budgets';
 import { getBudgetStatus } from '@/features/budgets/utils';
 import { ToolsGrid } from '@/features/overview/components/tools-grid';
 import { TransactionItem } from '@/features/overview/components/transaction-item';
@@ -25,10 +25,10 @@ import { useTransactions } from '@/features/transactions/hooks/use-transactions'
 import { useUser } from '@/features/user/context/user-context';
 import { UserService } from '@/features/user/services/user-service';
 import { useThemeColors } from '@/hooks/use-theme-colors';
-import { getMonthlyTotals, isTransferCategory, type MonthlyTotals } from '@/lib/db/queries';
+import { getMonthOverMonthTotals, getMonthlyTotals, type MonthOverMonthTotals, type MonthlyTotals } from '@/lib/db/queries';
 import { parseLocalDate, toISODateString } from '@/lib/utils/date';
 import { logger } from '@/lib/logger';
-import { useModals } from '@/providers/modal-context';
+import { useModalActions, useRefreshSignal } from '@/providers/modal-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { type Href, router } from 'expo-router';
@@ -45,11 +45,7 @@ function greeting(now: Date): string {
     return 'Good evening';
 }
 
-/** "YYYY-MM" for a date offset by `delta` months. */
-function monthKey(now: Date, delta = 0): string {
-    const d = new Date(now.getFullYear(), now.getMonth() + delta, 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
+const RECENT_OPTIONS = { limit: 5 } as const;
 
 function pctChange(current: number, previous: number): number | null {
     if (previous <= 0) return null;
@@ -85,16 +81,21 @@ export default function OverviewScreen() {
     const colors = useThemeColors();
     const insets = useSafeAreaInsets();
     const chartWidth = useChartWidth() - 8;
-    const { refreshSignal, openModal } = useModals();
-    const { transactions, loading: txLoading, refresh } = useTransactions();
+    const { openModal } = useModalActions();
+    // Stable so the memoized BudgetCards don't re-render with the screen.
+    const openBudget = useCallback((budget: BudgetWithSpend) => openModal('budget', { budget }), [openModal]);
+    const refreshSignal = useRefreshSignal();
+    // Only the 5 rows Recent shows; month figures are totalled in SQL.
+    const { transactions: recent, loading: txLoading, refresh } = useTransactions(undefined, RECENT_OPTIONS);
     const { goals, loading: goalsLoading, refresh: refreshGoals } = useSavingsGoals();
     const { accounts, refresh: refreshAccounts } = useAccounts();
     const { budgets, refresh: refreshBudgets } = useBudgets();
     const [monthly, setMonthly] = useState<MonthlyTotals[]>([]);
+    const [totals, setTotals] = useState<MonthOverMonthTotals | null>(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
 
     const loading = txLoading || goalsLoading;
-    const showSkeleton = loading && transactions.length === 0;
+    const showSkeleton = loading && recent.length === 0;
     const currency = profile.currency;
     // Re-evaluated when the calendar day changes, so "this month" rolls over
     // even if the tab stays mounted across midnight.
@@ -103,16 +104,19 @@ export default function OverviewScreen() {
 
     const loadMonthly = useCallback(async () => {
         try {
-            setMonthly(await getMonthlyTotals(6));
+            const [months, monthTotals] = await Promise.all([getMonthlyTotals(6), getMonthOverMonthTotals()]);
+            setMonthly(months);
+            setTotals(monthTotals);
         } catch (e) {
             logger.error('Failed to load monthly totals', e);
         }
     }, []);
 
+    // `today` too: "this month" rolls over if the tab stays mounted past midnight.
     useEffect(() => {
         const task = InteractionManager.runAfterInteractions(() => { loadMonthly(); });
         return () => task.cancel();
-    }, [loadMonthly, refreshSignal]);
+    }, [loadMonthly, refreshSignal, today]);
 
     const handleRefresh = useCallback(async () => {
         setIsRefreshing(true);
@@ -121,20 +125,14 @@ export default function OverviewScreen() {
     }, [refresh, refreshGoals, refreshAccounts, refreshBudgets, loadMonthly]);
 
     const stats = useMemo(() => {
-        const thisKey = monthKey(now);
-        const lastKey = monthKey(now, -1);
-        let income = 0, expense = 0, lastIncome = 0, lastExpense = 0, allIncome = 0, allExpense = 0;
-        for (const t of transactions) {
-            const k = t.date?.slice(0, 7);
-            const isIncome = t.type === 'income';
-            if (isIncome) allIncome += t.amount; else allExpense += t.amount;
-            // Lending/borrowing moves the balance but isn't income or spending.
-            if (isTransferCategory(t.category)) continue;
-            // "So far": scheduled (future-dated) entries don't count yet.
-            if (t.date && t.date > today) continue;
-            if (k === thisKey) { if (isIncome) income += t.amount; else expense += t.amount; }
-            else if (k === lastKey) { if (isIncome) lastIncome += t.amount; else lastExpense += t.amount; }
-        }
+        // Transfers (lending, between accounts, savings) and future-dated
+        // entries are already left out by the query.
+        const income = totals?.thisMonth.income ?? 0;
+        const expense = totals?.thisMonth.expense ?? 0;
+        const lastIncome = totals?.lastMonth.income ?? 0;
+        const lastExpense = totals?.lastMonth.expense ?? 0;
+        const allIncome = totals?.allIncome ?? 0;
+        const allExpense = totals?.allExpense ?? 0;
         // Account balances already include opening balances + all transactions,
         // so the total matches Payment Methods and the add-expense balance check.
         const balance = accounts.length
@@ -148,7 +146,7 @@ export default function OverviewScreen() {
             incomeDelta: pctChange(income, lastIncome),
             expenseDelta: pctChange(expense, lastExpense),
         };
-    }, [transactions, accounts, now, today]);
+    }, [totals, accounts]);
 
     const atRisk = useMemo(
         () => budgets
@@ -165,7 +163,6 @@ export default function OverviewScreen() {
         return { count: goals.length, active: active.length, target, saved, pct: target > 0 ? (saved / target) * 100 : 0 };
     }, [goals]);
 
-    const recent = useMemo(() => transactions.slice(0, 5), [transactions]);
     const hasCashflow = monthly.some(m => m.income > 0 || m.expense > 0);
     const spentShare = stats.income > 0 ? Math.min((stats.expense / stats.income) * 100, 100) : 0;
     const firstName = (profile.name || '').trim().split(/\s+/)[0];
@@ -334,8 +331,8 @@ export default function OverviewScreen() {
                                         key={b.id}
                                         budget={b}
                                         currency={currency}
-                                        onEdit={budget => openModal('budget', { budget })}
-                                        onDelete={budget => openModal('budget', { budget })}
+                                        onEdit={openBudget}
+                                        onDelete={openBudget}
                                     />
                                 ))}
                             </Section>

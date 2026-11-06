@@ -4,8 +4,11 @@ import { useThemeColors } from '@/hooks/use-theme-colors';
 import { LoanWithDetails } from '@/lib/db/queries';
 import { UserService } from '@/features/user/services/user-service';
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import React, { memo } from 'react';
 import { Pressable, View } from 'react-native';
+
+// Vertical slop of 8; horizontal kept to 4 so adjacent chips (gap-2) don't overlap.
+const CHIP_HIT_SLOP = { top: 8, bottom: 8, left: 4, right: 4 };
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -23,7 +26,7 @@ interface LoanItemProps {
   onTransfer: (loan: LoanWithDetails) => void;
 }
 
-export function LoanItem({ loan, currencyCode, onEdit, onDelete, onRecordPayment, onTransfer }: LoanItemProps) {
+export const LoanItem = memo(function LoanItem({ loan, currencyCode, onEdit, onDelete, onRecordPayment, onTransfer }: LoanItemProps) {
   const colors = useThemeColors();
 
   const isGiven = loan.type === 'given';
@@ -180,7 +183,10 @@ export function LoanItem({ loan, currencyCode, onEdit, onDelete, onRecordPayment
         <View className="flex-row gap-2 justify-end">
           <Pressable
             onPress={() => onRecordPayment(loan)}
-            className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl"
+            className="flex-row items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-xl"
+            hitSlop={CHIP_HIT_SLOP}
+            accessibilityRole="button"
+            accessibilityLabel={isGiven ? 'Mark repaid' : 'Record payment'}
             style={{ backgroundColor: `${colors.success}18` }}
           >
             <Ionicons name="checkmark-circle-outline" size={13} color={colors.success} />
@@ -190,7 +196,10 @@ export function LoanItem({ loan, currencyCode, onEdit, onDelete, onRecordPayment
           </Pressable>
           <Pressable
             onPress={() => onEdit(loan)}
-            className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl"
+            className="flex-row items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-xl"
+            hitSlop={CHIP_HIT_SLOP}
+            accessibilityRole="button"
+            accessibilityLabel="Edit loan"
             style={{ borderWidth: 1, borderColor: colors.borderStrong }}
           >
             <Ionicons name="pencil-outline" size={13} color={colors.primary} />
@@ -200,7 +209,10 @@ export function LoanItem({ loan, currencyCode, onEdit, onDelete, onRecordPayment
           </Pressable>
           <Pressable
             onPress={() => onDelete(loan)}
-            className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl"
+            className="flex-row items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-xl"
+            hitSlop={CHIP_HIT_SLOP}
+            accessibilityRole="button"
+            accessibilityLabel="Delete loan"
             style={{ borderWidth: 1, borderColor: colors.borderStrong }}
           >
             <Ionicons name="trash-outline" size={13} color={colors.expense} />
@@ -230,4 +242,4 @@ export function LoanItem({ loan, currencyCode, onEdit, onDelete, onRecordPayment
       )}
     </AppCard>
   );
-}
+});

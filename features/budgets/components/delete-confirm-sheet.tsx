@@ -1,4 +1,5 @@
 import { AppButton, ThemedText } from '@/components/common';
+import { MAX_CONTENT_WIDTH } from '@/hooks/use-content-width';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
@@ -59,6 +60,10 @@ export function DeleteConfirmSheet({ title, onCancel, onConfirm, isDeleting }: D
 
 const styles = StyleSheet.create({
     sheet: {
+        // Same reading column as the app on tablets / landscape.
+        width: '100%',
+        maxWidth: MAX_CONTENT_WIDTH,
+        alignSelf: 'center',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         paddingHorizontal: 24,

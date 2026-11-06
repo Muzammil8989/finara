@@ -116,8 +116,12 @@ export function buildWorkbook(data: ReportData): XLSX.WorkBook {
 
 /** Build the .xlsx, save it to the cache directory, and open the share sheet. Returns the file URI. */
 export async function exportExcel(data: ReportData): Promise<string> {
+    // Yield one macrotask so the caller's spinner can paint before the
+    // synchronous workbook build blocks the JS thread.
+    await new Promise(resolve => setTimeout(resolve, 0));
     const wb = buildWorkbook(data);
-    const base64: string = XLSX.write(wb, { type: 'base64', bookType: 'xlsx', compression: true });
+    // No zip compression: noticeably faster on device, and the file is small anyway.
+    const base64: string = XLSX.write(wb, { type: 'base64', bookType: 'xlsx', compression: false });
     const uri = `${FileSystem.cacheDirectory}${reportFileStem(data)}.xlsx`;
     await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
     if (await Sharing.isAvailableAsync()) {

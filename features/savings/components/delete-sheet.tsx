@@ -1,4 +1,5 @@
 import { AppButton, ThemedText } from '@/components/common';
+import { MAX_CONTENT_WIDTH } from '@/hooks/use-content-width';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
@@ -23,6 +24,9 @@ export function DeleteSheet({ name, onCancel, onConfirm, isDeleting }: DeleteShe
                 <Animated.View
                     entering={FadeInUp.duration(300).easing(Easing.out(Easing.cubic))}
                     style={{
+                        width: '100%',
+                        maxWidth: MAX_CONTENT_WIDTH,
+                        alignSelf: 'center',
                         backgroundColor: colors.surface,
                         borderTopLeftRadius: 24,
                         borderTopRightRadius: 24,

@@ -13,21 +13,17 @@ jest.mock('@/lib/db/queries', () => ({
 }));
 
 jest.mock('@/providers/modal-context', () => ({
-    useModals: jest.fn(() => ({
-        refreshSignal: 0,
-        openModal: jest.fn(),
-        closeModal: jest.fn(),
-    })),
+    useRefreshSignal: jest.fn(() => 0),
 }));
 
 import { ensureDefaultAccount, getAccountsWithBalance } from '@/lib/db/queries';
 import { isDbReady } from '@/lib/db/db-client';
-import { useModals } from '@/providers/modal-context';
+import { useRefreshSignal } from '@/providers/modal-context';
 
 const mockEnsureDefault = ensureDefaultAccount as jest.Mock;
 const mockGetAccounts = getAccountsWithBalance as jest.Mock;
 const mockIsDbReady = isDbReady as jest.Mock;
-const mockUseModals = useModals as jest.Mock;
+const mockUseRefreshSignal = useRefreshSignal as jest.Mock;
 
 const MOCK_ACCOUNTS = [
     { id: 1, name: 'Cash', type: 'cash', balance: 500 },
@@ -39,7 +35,7 @@ beforeEach(() => {
     mockIsDbReady.mockReturnValue(true);
     mockEnsureDefault.mockResolvedValue(undefined);
     mockGetAccounts.mockResolvedValue(MOCK_ACCOUNTS);
-    mockUseModals.mockReturnValue({ refreshSignal: 0, openModal: jest.fn(), closeModal: jest.fn() });
+    mockUseRefreshSignal.mockReturnValue(0);
 });
 
 describe('useAccounts', () => {
@@ -95,11 +91,7 @@ describe('useAccounts', () => {
 
     it('re-fetches when refreshSignal changes', async () => {
         let signal = 0;
-        mockUseModals.mockImplementation(() => ({
-            refreshSignal: signal,
-            openModal: jest.fn(),
-            closeModal: jest.fn(),
-        }));
+        mockUseRefreshSignal.mockImplementation(() => signal);
 
         const { result, rerender } = renderHook(() => useAccounts());
 
@@ -108,7 +100,7 @@ describe('useAccounts', () => {
         const callsAfterMount = mockGetAccounts.mock.calls.length;
 
         signal = 1;
-        mockUseModals.mockReturnValue({ refreshSignal: 1, openModal: jest.fn(), closeModal: jest.fn() });
+        mockUseRefreshSignal.mockImplementation(() => 1);
         rerender({});
 
         await waitFor(() => expect(mockGetAccounts).toHaveBeenCalledTimes(callsAfterMount + 1));

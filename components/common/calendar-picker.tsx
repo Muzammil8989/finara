@@ -1,3 +1,4 @@
+import { MAX_CONTENT_WIDTH } from '@/hooks/use-content-width';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
@@ -11,6 +12,8 @@ const MONTH_NAMES = [
     'July', 'August', 'September', 'October', 'November', 'December',
 ];
 const WEEK_DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+/** Caps the 7-column day grid so cells stay ~56dp on tablets instead of ballooning. */
+const CALENDAR_GRID_MAX_WIDTH = 7 * 56;
 
 /** Format a local Date to YYYY-MM-DD without timezone shift */
 export const toLocalDateStr = (d: Date): string => {
@@ -117,7 +120,13 @@ export function CalendarPicker({
                 <ThemedText style={{ fontSize: 18, fontWeight: '700', color: colors.textPrimary }}>
                     Select Date
                 </ThemedText>
-                <Pressable onPress={onClose} style={styles.closeButton}>
+                <Pressable
+                    onPress={onClose}
+                    style={styles.closeButton}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close"
+                >
                     <Ionicons name="close" size={24} color={colors.expense} />
                 </Pressable>
             </View>
@@ -222,10 +231,13 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.5)',
     },
     container: {
+        // No left/right insets: the sheet is centred and capped to the app's
+        // reading column so it doesn't stretch edge-to-edge on tablets.
         position: 'absolute',
         bottom: 0,
-        left: 0,
-        right: 0,
+        width: '100%',
+        maxWidth: MAX_CONTENT_WIDTH,
+        alignSelf: 'center',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         paddingHorizontal: 24,
@@ -262,9 +274,9 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     navButton: { padding: 8 },
-    weekDaysRow: { flexDirection: 'row', marginBottom: 12 },
+    weekDaysRow: { flexDirection: 'row', marginBottom: 12, width: '100%', maxWidth: CALENDAR_GRID_MAX_WIDTH, alignSelf: 'center' },
     weekDayCell: { flex: 1, alignItems: 'center' },
-    calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 20 },
+    calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 20, width: '100%', maxWidth: CALENDAR_GRID_MAX_WIDTH, alignSelf: 'center' },
     dayCell: {
         width: `${100 / 7}%` as DimensionValue,
         aspectRatio: 1,

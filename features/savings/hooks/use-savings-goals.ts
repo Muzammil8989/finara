@@ -1,16 +1,19 @@
 import { isDbReady } from '@/lib/db/db-client';
 import { getSavingsGoals } from '@/lib/db/queries';
 import { SavingsGoal } from '@/lib/db/schema';
-import { useModals } from '@/providers/modal-context';
+import { useRefreshSignal, type RefreshDomain } from '@/providers/modal-context';
 import { logger } from '@/lib/logger';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { InteractionManager } from 'react-native';
+
+// Contributions are recorded as transactions.
+const REFRESH_DOMAINS: readonly RefreshDomain[] = ['savings', 'transactions'];
 
 export function useSavingsGoals() {
     const [goals, setGoals] = useState<SavingsGoal[]>([]);
     const [loading, setLoading] = useState(true);
     const mountedRef = useRef(true);
-    const { refreshSignal } = useModals();
+    const refreshSignal = useRefreshSignal(REFRESH_DOMAINS);
 
     useEffect(() => {
         mountedRef.current = true;

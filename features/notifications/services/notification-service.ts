@@ -1,4 +1,5 @@
-import { getBudgetSpend, getBudgetsWithDetails } from '@/lib/db/queries';
+import { getBudgetsWithDetails } from '@/lib/db/queries';
+import { loadSpendByRange } from '@/features/budgets/services/budget-spend';
 import { getPeriodDateRange } from '@/lib/utils/date';
 import { logger } from '@/lib/logger';
 import { UserService } from '@/features/user/services/user-service';
@@ -109,13 +110,16 @@ export const NotificationService = {
             const profile = await UserService.getProfile();
             const budgetsRaw = await getBudgetsWithDetails();
             const hideDetails = await keepPrivate();
-            const relevant = budgetsRaw.filter(b => b.category_id === null || b.category_id === categoryId);
+            // An expense outside a budget's current period can't trigger it.
+            const relevant = budgetsRaw
+                .filter(b => b.category_id === null || b.category_id === categoryId)
+                .map(budget => ({ budget, range: getPeriodDateRange(budget.period) }))
+                .filter(({ range }) => !date || (date >= range.startDate && date <= range.endDate));
+            if (relevant.length === 0) return;
+            const spentIn = await loadSpendByRange(relevant.map(r => r.range));
 
-            for (const budget of relevant) {
-                const { startDate, endDate } = getPeriodDateRange(budget.period);
-                if (date && (date < startDate || date > endDate)) continue;
-                const spendResult = await getBudgetSpend(budget.category_id, startDate, endDate);
-                const spent = Number(spendResult[0]?.total) || 0;
+            for (const { budget, range } of relevant) {
+                const spent = spentIn(range, budget.category_id);
                 const threshold = budget.alert_threshold ?? 80;
                 const percentUsed = budget.amount > 0 ? (spent / budget.amount) * 100 : 0;
                 const prevPercent = budget.amount > 0 ? ((spent - newAmount) / budget.amount) * 100 : 0;

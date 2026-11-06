@@ -13,18 +13,16 @@ import {
     EmptyState,
     HeaderIconButton,
     PeriodSelector,
-    Rule,
     ScreenHeader,
-    Section,
     Skeleton,
     StatFigure,
     ThemedText,
 } from '@/components/common';
 import { CashflowBars } from '@/features/reports/components/cashflow-bars';
 import { CategoryBars } from '@/features/reports/components/category-bars';
+import { ChartCard } from '@/features/reports/components/chart-card';
 import { DailySpendingCard } from '@/features/reports/components/daily-spending-card';
-import { PeriodFilter, buildDonutSlices, buildStandfirst, getDateRange, useChartWidth } from '@/features/reports/utils';
-import { useTransactions } from '@/features/transactions/hooks/use-transactions';
+import { PeriodFilter, buildDonutSlices, buildStandfirst, getDateRange } from '@/features/reports/utils';
 import { useUser } from '@/features/user/context/user-context';
 import { UserService } from '@/features/user/services/user-service';
 import { useThemeColors } from '@/hooks/use-theme-colors';
@@ -35,11 +33,12 @@ import {
     getDailySpending,
     getExpenseByCategory,
     getMonthlyTotals,
-    isTransferCategory,
+    getSummaryByDateRange,
 } from '@/lib/db/queries';
 import { logger } from '@/lib/logger';
+import { getCurrencySymbol } from '@/lib/utils/currency';
 import { parseLocalDate, toISODateString } from '@/lib/utils/date';
-import { useModals } from '@/providers/modal-context';
+import { useModalActions, useRefreshSignal } from '@/providers/modal-context';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { InteractionManager, RefreshControl, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -77,13 +76,24 @@ function ReportsSkeleton() {
     );
 }
 
+/** One key figure in a surface tile; two tiles per row. */
+function FigureTile({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+    return (
+        <View
+            className="rounded-2xl border border-divider dark:border-dark-divider bg-surface dark:bg-dark-surface px-4 py-3"
+            style={{ flexBasis: '46%', flexGrow: 1 }}
+        >
+            <StatFigure label={label} value={value} valueColor={valueColor} />
+        </View>
+    );
+}
+
 export default function ReportsScreen() {
     const { profile } = useUser();
     const colors = useThemeColors();
     const insets = useSafeAreaInsets();
-    const chartWidth = useChartWidth() - 8;
-    const { refreshSignal, openModal } = useModals();
-    const { transactions, refresh } = useTransactions();
+    const { openModal } = useModalActions();
+    const refreshSignal = useRefreshSignal();
     const currency = profile.currency;
     const fmt = useCallback((n: number) => UserService.formatCurrency(n, currency), [currency]);
 
@@ -91,6 +101,7 @@ export default function ReportsScreen() {
     const [categoryData, setCategoryData] = useState<CategoryExpense[]>([]);
     const [monthlyData, setMonthlyData] = useState<MonthlyTotals[]>([]);
     const [dailyData, setDailyData] = useState<DailySpend[]>([]);
+    const [totals, setTotals] = useState({ income: 0, expense: 0 });
     const [loading, setLoading] = useState(true);
 
     // Figures and charts run to today: scheduled (future-dated) entries are
@@ -105,13 +116,21 @@ export default function ReportsScreen() {
             const { start, end: periodEnd, months } = getDateRange(period);
             const todayStr = toISODateString(new Date());
             const end = periodEnd < todayStr ? periodEnd : todayStr;
-            const [cats, monthly, daily] = await Promise.all([
+            const [cats, monthly, daily, summary] = await Promise.all([
                 getExpenseByCategory(start, end),
                 // "This year" charts January → this month, matching the key figures.
                 // Shorter periods have little trend to show, so they chart 6 months.
                 getMonthlyTotals(period === 'year' ? new Date().getMonth() + 1 : Math.max(months, 6)),
                 period === 'month' ? getDailySpending(start, end) : Promise.resolve([]),
+                // Income / spending for the period in SQL (transfers excluded).
+                getSummaryByDateRange(start, end),
             ]);
+            let income = 0, expense = 0;
+            for (const row of summary) {
+                if (row.type === 'income') income = Number(row.total) || 0;
+                else expense = Number(row.total) || 0;
+            }
+            setTotals({ income, expense });
             setCategoryData(cats);
             setMonthlyData(monthly);
             setDailyData(daily);
@@ -122,23 +141,17 @@ export default function ReportsScreen() {
         }
     }, [period]);
 
-    // refresh() is already deferred inside its hook; only loadData() needs scheduling here.
     useEffect(() => {
         const task = InteractionManager.runAfterInteractions(() => loadData());
         return () => task.cancel();
     }, [refreshSignal, loadData]);
 
     const figures = useMemo(() => {
-        let income = 0, expense = 0;
-        for (const t of transactions) {
-            if (t.date == null || t.date < range.start || t.date > range.end) continue;
-            if (isTransferCategory(t.category)) continue; // lending/borrowing isn't income or spending
-            if (t.type === 'income') income += t.amount; else expense += t.amount;
-        }
+        const { income, expense } = totals;
         const net = income - expense;
         const savingsRate = income > 0 ? Math.round((net / income) * 100) : null;
         return { income, expense, net, savingsRate };
-    }, [transactions, range.start, range.end]);
+    }, [totals]);
 
     const standfirst = useMemo(() => {
         const top = buildDonutSlices(categoryData, 6).slices.find(s => s.key !== 'other');
@@ -151,22 +164,39 @@ export default function ReportsScreen() {
         });
     }, [categoryData, period, figures, fmt]);
 
-    const lineData = dailyData.map(d => ({ value: d.amount, dataPointText: '' }));
+    const lineData = useMemo(() => dailyData.map(d => ({ value: d.amount, dataPointText: '' })), [dailyData]);
     // Months are zero-filled, so "no data" means every month is empty.
     const noData = categoryData.length === 0 && monthlyData.every(m => m.income === 0 && m.expense === 0);
     const showSkeleton = loading && categoryData.length === 0 && monthlyData.length === 0;
     const refreshing = loading && (categoryData.length > 0 || monthlyData.length > 0);
 
     const handleRefresh = useCallback(async () => {
-        await Promise.all([refresh(), loadData()]);
-    }, [refresh, loadData]);
+        await loadData();
+    }, [loadData]);
 
     return (
         <View className="flex-1 bg-background dark:bg-dark-background">
+            {/* Header stays put; only the content below it scrolls */}
+            <View className="pb-2" style={{ paddingTop: insets.top }}>
+                <ScreenHeader
+                    showBack={false}
+                    kicker={formatRange(range.start, range.end)}
+                    title="Insights"
+                    right={
+                        <HeaderIconButton
+                            icon="share-outline"
+                            accessibilityLabel="Export report as PDF or Excel"
+                            onPress={() => openModal('export')}
+                        />
+                    }
+                />
+                <PeriodSelector value={period} onChange={setPeriod} className="mx-5" />
+            </View>
+
             <ScrollView
+                className="flex-1"
                 contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
                 showsVerticalScrollIndicator={false}
-                stickyHeaderIndices={[0]}
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
@@ -176,21 +206,6 @@ export default function ReportsScreen() {
                     />
                 }
             >
-                <View className="bg-background dark:bg-dark-background" style={{ paddingTop: insets.top }}>
-                    <ScreenHeader
-                        showBack={false}
-                        kicker={formatRange(range.start, range.end)}
-                        title="Insights"
-                        right={
-                            <HeaderIconButton
-                                icon="share-outline"
-                                accessibilityLabel="Export report as PDF or Excel"
-                                onPress={() => openModal('export')}
-                            />
-                        }
-                    />
-                    <PeriodSelector value={period} onChange={setPeriod} className="mx-5" />
-                </View>
 
                 {showSkeleton ? (
                     <ReportsSkeleton />
@@ -210,53 +225,54 @@ export default function ReportsScreen() {
                         </View>
 
                         {/* ── Key figures ──────────────────────────────── */}
-                        <View className="px-5 mt-6">
-                            <Rule strong className="mb-4" />
-                            <View className="flex-row mb-5">
-                                <View className="flex-1">
-                                    <StatFigure label="Income" value={fmt(figures.income)} valueColor={colors.income} />
-                                </View>
-                                <View className="flex-1">
-                                    <StatFigure label="Spending" value={fmt(figures.expense)} />
-                                </View>
-                            </View>
-                            <View className="flex-row">
-                                <View className="flex-1">
-                                    <StatFigure
-                                        label="Net"
-                                        value={`${figures.net < 0 ? '−' : '+'}${fmt(Math.abs(figures.net))}`}
-                                        valueColor={figures.net < 0 ? colors.expense : colors.textPrimary}
-                                    />
-                                </View>
-                                <View className="flex-1">
-                                    <StatFigure
-                                        label="Savings rate"
-                                        value={figures.savingsRate == null ? '—' : `${figures.savingsRate}%`}
-                                        valueColor={figures.savingsRate != null && figures.savingsRate < 0 ? colors.expense : undefined}
-                                    />
-                                </View>
-                            </View>
+                        <View className="px-5 mt-5 flex-row flex-wrap" style={{ gap: 10 }}>
+                            <FigureTile label="Income" value={fmt(figures.income)} valueColor={colors.income} />
+                            <FigureTile label="Spending" value={fmt(figures.expense)} valueColor={colors.expense} />
+                            <FigureTile
+                                label="Net"
+                                value={`${figures.net < 0 ? '−' : '+'}${fmt(Math.abs(figures.net))}`}
+                                valueColor={figures.net < 0 ? colors.expense : colors.textPrimary}
+                            />
+                            <FigureTile
+                                label="Savings rate"
+                                value={figures.savingsRate == null ? '—' : `${figures.savingsRate}%`}
+                                valueColor={figures.savingsRate != null && figures.savingsRate < 0 ? colors.expense : undefined}
+                            />
                         </View>
 
                         {/* ── Cash flow ────────────────────────────────── */}
                         {monthlyData.some(m => m.income > 0 || m.expense > 0) && (
-                            <Section kicker={period === 'year' ? `${new Date().getFullYear()} so far` : `Last ${monthlyData.length} months`} title="Income vs spending">
-                                <CashflowBars data={monthlyData} currency={currency} width={chartWidth} />
-                            </Section>
+                            <ChartCard
+                                kicker={period === 'year' ? `${new Date().getFullYear()} so far` : `Last ${monthlyData.length} months`}
+                                title="Income vs spending"
+                                legend={[
+                                    { label: 'Income', color: colors.chartIncome },
+                                    { label: 'Spending', color: colors.chartExpense },
+                                ]}
+                            >
+                                <CashflowBars data={monthlyData} currency={currency} />
+                            </ChartCard>
                         )}
 
                         {/* ── Categories ───────────────────────────────── */}
                         {categoryData.length > 0 && (
-                            <Section kicker="Where it went" title="Spending by category">
+                            <ChartCard kicker="Where it went" title="Spending by category">
                                 <CategoryBars categoryData={categoryData} currency={currency} />
-                            </Section>
+                            </ChartCard>
                         )}
 
                         {/* ── Daily ────────────────────────────────────── */}
                         {period === 'month' && lineData.length > 1 && (
-                            <Section kicker="This month" title="Daily spending">
-                                <DailySpendingCard lineData={lineData} formatValue={fmt} />
-                            </Section>
+                            <ChartCard
+                                kicker="This month"
+                                title="Daily spending"
+                                legend={[
+                                    { label: 'Spent per day', color: colors.primary },
+                                    { label: 'Daily average', color: colors.textMuted, dashed: true },
+                                ]}
+                            >
+                                <DailySpendingCard lineData={lineData} formatValue={fmt} symbol={getCurrencySymbol(currency)} />
+                            </ChartCard>
                         )}
                     </>
                 )}

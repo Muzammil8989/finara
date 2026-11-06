@@ -4,7 +4,7 @@ import { HouseholdExpenseWithCategory } from '@/lib/db/queries';
 import { UserService } from '@/features/user/services/user-service';
 import { IoniconsName } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import React, { memo } from 'react';
 import { Pressable, View } from 'react-native';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -21,7 +21,7 @@ interface ExpenseItemProps {
     onDelete: (item: HouseholdExpenseWithCategory) => void;
 }
 
-export function ExpenseItem({ item, currencyCode, onEdit, onDelete }: ExpenseItemProps) {
+export const ExpenseItem = memo(function ExpenseItem({ item, currencyCode, onEdit, onDelete }: ExpenseItemProps) {
     const colors = useThemeColors();
     const isDark = colors.scheme === 'dark';
 
@@ -97,4 +97,4 @@ export function ExpenseItem({ item, currencyCode, onEdit, onDelete }: ExpenseIte
             </View>
         </Pressable>
     );
-}
+});

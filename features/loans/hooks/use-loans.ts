@@ -1,5 +1,5 @@
 import { isDbReady } from '@/lib/db/db-client';
-import { useModals } from '@/providers/modal-context';
+import { useRefreshSignal, type RefreshDomain } from '@/providers/modal-context';
 import { ensureSystemLoanCategories, getLoans, type LoanWithDetails } from '@/lib/db/queries';
 import { logger } from '@/lib/logger';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -16,12 +16,14 @@ export interface SystemLoanCategoryIds {
   incomeCategoryId: number;
 }
 
+const REFRESH_DOMAINS = ['loans', 'transactions'] as const satisfies readonly RefreshDomain[];
+
 export function useLoans(filter: 'all' | 'given' | 'taken' = 'all') {
   const [loans, setLoans] = useState<LoanWithDetails[]>([]);
   const [summary, setSummary] = useState<LoanSummary>({ totalGiven: 0, totalTaken: 0, totalGivenSettled: 0, totalTakenSettled: 0 });
   const [categoryIds, setCategoryIds] = useState<SystemLoanCategoryIds | null>(null);
   const [loading, setLoading] = useState(true);
-  const { refreshSignal } = useModals();
+  const refreshSignal = useRefreshSignal(REFRESH_DOMAINS);
   const mountedRef = useRef(true);
   const categoryIdsInitialized = useRef(false);
 
@@ -42,15 +44,12 @@ export function useLoans(filter: 'all' | 'given' | 'taken' = 'all') {
         categoryIdsInitialized.current = true;
       }
 
-      const typeFilter = filter === 'all' ? undefined : filter;
-      const all = await getLoans(typeFilter ? { type: typeFilter } : undefined);
+      // One fetch: the summary covers every loan regardless of the filter,
+      // and the filtered list is a subset of it.
+      const allForSummary = await getLoans();
       if (!mountedRef.current) return;
 
-      setLoans(all);
-
-      // Compute summary from full list (fetch all to get totals regardless of filter)
-      const allForSummary = filter === 'all' ? all : await getLoans();
-      if (!mountedRef.current) return;
+      setLoans(filter === 'all' ? allForSummary : allForSummary.filter((l) => l.type === filter));
 
       const totalGiven = allForSummary
         .filter((l) => l.type === 'given' && l.is_settled === 0)

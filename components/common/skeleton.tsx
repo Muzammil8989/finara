@@ -1,13 +1,12 @@
 import { useThemeColors } from '@/hooks/use-theme-colors';
-import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useState } from 'react';
-import { DimensionValue, LayoutChangeEvent, View, ViewStyle } from 'react-native';
+import React, { useEffect } from 'react';
+import { DimensionValue, ViewStyle } from 'react-native';
 import Animated, {
+    cancelAnimation,
     Easing,
-    interpolate,
+    makeMutable,
     useAnimatedStyle,
     useReducedMotion,
-    useSharedValue,
     withRepeat,
     withTiming,
 } from 'react-native-reanimated';
@@ -19,60 +18,54 @@ interface SkeletonProps {
     style?: ViewStyle;
 }
 
+/**
+ * One pulse shared by every skeleton on screen. Loading states mount 30+
+ * skeletons at once; one animation (instead of one looping gradient each) keeps
+ * low-end devices smooth and keeps the placeholders in sync. It runs only while
+ * at least one skeleton is mounted.
+ */
+const pulse = makeMutable(0);
+let mountedCount = 0;
+
+function startPulse() {
+    mountedCount += 1;
+    if (mountedCount === 1) {
+        pulse.value = 0;
+        pulse.value = withRepeat(withTiming(1, { duration: 800, easing: Easing.inOut(Easing.quad) }), -1, true);
+    }
+}
+
+function stopPulse() {
+    mountedCount = Math.max(0, mountedCount - 1);
+    if (mountedCount === 0) cancelAnimation(pulse);
+}
+
 export function Skeleton({ width = '100%', height = 16, borderRadius = 8, style }: SkeletonProps) {
-    const [containerWidth, setContainerWidth] = useState(300);
-    const shimmer = useSharedValue(0);
     const colors = useThemeColors();
     const reduceMotion = useReducedMotion();
 
-    const baseColor = colors.backgroundAlt;
-    const shineColor = colors.surfaceAlt;
-
     useEffect(() => {
         if (reduceMotion) return;
-        shimmer.value = withRepeat(
-            withTiming(1, { duration: 1200, easing: Easing.linear }),
-            -1,
-            false,
-        );
-    }, [shimmer, reduceMotion]);
+        startPulse();
+        return stopPulse;
+    }, [reduceMotion]);
 
     const animatedStyle = useAnimatedStyle(() => ({
-        transform: [{ translateX: interpolate(shimmer.value, [0, 1], [-containerWidth, containerWidth]) }],
+        opacity: reduceMotion ? 1 : 1 - pulse.value * 0.45,
     }));
 
-    const onLayout = (e: LayoutChangeEvent) => {
-        const w = e.nativeEvent.layout.width;
-        if (w > 0) setContainerWidth(w);
-    };
-
     return (
-        <View
-            onLayout={onLayout}
+        <Animated.View
             style={[
                 {
                     width,
                     height,
                     borderRadius,
-                    backgroundColor: baseColor,
-                    overflow: 'hidden',
+                    backgroundColor: colors.backgroundAlt,
                 },
                 style,
+                animatedStyle,
             ]}
-        >
-            <Animated.View
-                style={[
-                    { position: 'absolute', top: 0, bottom: 0, width: containerWidth },
-                    animatedStyle,
-                ]}
-            >
-                <LinearGradient
-                    colors={[baseColor, shineColor, baseColor]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={{ flex: 1 }}
-                />
-            </Animated.View>
-        </View>
+        />
     );
 }
