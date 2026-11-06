@@ -63,14 +63,13 @@ export const UserService = {
     },
 
     getCurrencySymbol(code: string): string {
-        const currency = POPULAR_CURRENCIES.find(c => c.code === code);
-        return currency?.symbol || '$';
+        return getSymbolMap().get(code) || '$';
     },
 
     formatCurrency(amount: number, code: string): string {
         const symbol = this.getCurrencySymbol(code);
         const sign = amount < 0 ? '-' : '';
-        return `${sign}${symbol}${Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return `${sign}${symbol}${getAmountFormatter().format(Math.abs(amount))}`;
     },
 };
 
@@ -109,3 +108,17 @@ export const POPULAR_CURRENCIES = [
     { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'NG' },
     { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'KE' },
 ];
+
+// Built once: formatCurrency runs for every row and section header, and both
+// toLocaleString() and a linear currency lookup are slow on Hermes/Android.
+let symbolMap: Map<string, string> | null = null;
+function getSymbolMap(): Map<string, string> {
+    symbolMap ??= new Map(POPULAR_CURRENCIES.map(c => [c.code, c.symbol]));
+    return symbolMap;
+}
+
+let amountFormatter: Intl.NumberFormat | null = null;
+function getAmountFormatter(): Intl.NumberFormat {
+    amountFormatter ??= new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return amountFormatter;
+}

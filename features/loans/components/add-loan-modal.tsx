@@ -18,6 +18,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface AddLoanModalProps {
   visible: boolean;
@@ -29,6 +30,7 @@ interface AddLoanModalProps {
 }
 
 export function AddLoanModal({ visible, onClose, onSuccess, editingLoan, currencyCode, categoryIds }: AddLoanModalProps) {
+  const insets = useSafeAreaInsets();
   const colors = useThemeColors();
   const { accounts } = useAccounts();
   const currencySymbol = POPULAR_CURRENCIES.find(c => c.code === currencyCode)?.symbol ?? '$';
@@ -148,7 +150,7 @@ export function AddLoanModal({ visible, onClose, onSuccess, editingLoan, currenc
         maxHeight="92%"
         paddingHorizontal={28}
         paddingTop={48}
-        paddingBottom={64}
+        paddingBottom={insets.bottom + 32}
         gradientColors={[`${accentColor}18`, `${accentColor}06`, 'transparent']}
         keyboardAvoiding
       >

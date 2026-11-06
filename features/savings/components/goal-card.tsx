@@ -12,16 +12,17 @@ import { monthlyPaceNeeded } from '../utils';
 interface GoalCardProps {
     goal: SavingsGoal;
     currency: string;
-    onEdit: () => void;
-    onDelete: () => void;
-    onContribute: () => void;
+    onEdit: (goal: SavingsGoal) => void;
+    onDelete: (goal: SavingsGoal) => void;
+    onContribute: (goal: SavingsGoal) => void;
 }
 
 /**
  * One goal as a ruled row: progress ring, name and deadline, saved / target,
  * and — when there's a deadline — what it takes per month to get there.
+ * Memoized; callbacks receive the goal so the list can pass stable handlers.
  */
-export function GoalCard({ goal, currency, onEdit, onDelete, onContribute }: GoalCardProps) {
+export const GoalCard = React.memo(function GoalCard({ goal, currency, onEdit, onDelete, onContribute }: GoalCardProps) {
     const colors = useThemeColors();
 
     const pct = goal.target_amount > 0
@@ -53,13 +54,13 @@ export function GoalCard({ goal, currency, onEdit, onDelete, onContribute }: Goa
     return (
         <View className="py-4 border-b border-divider dark:border-dark-divider">
             <Pressable
-                onPress={onEdit}
-                onLongPress={onDelete}
+                onPress={() => onEdit(goal)}
+                onLongPress={() => onDelete(goal)}
                 accessibilityRole="button"
                 accessibilityLabel={`${goal.name}. ${saved} of ${target} saved, ${Math.round(pct)} percent. ${deadlineText}.`}
                 accessibilityHint="Opens the goal to edit"
                 accessibilityActions={[{ name: 'activate', label: 'Edit' }, { name: 'delete', label: 'Delete' }]}
-                onAccessibilityAction={e => (e.nativeEvent.actionName === 'delete' ? onDelete() : onEdit())}
+                onAccessibilityAction={e => (e.nativeEvent.actionName === 'delete' ? onDelete(goal) : onEdit(goal))}
                 className="flex-row items-center"
                 style={({ pressed }) => pressed && { opacity: 0.7 }}
             >
@@ -94,7 +95,7 @@ export function GoalCard({ goal, currency, onEdit, onDelete, onContribute }: Goa
                         {pace != null ? `Needs ${UserService.formatCurrency(pace, currency)}/month` : ' '}
                     </ThemedText>
                     <Pressable
-                        onPress={onContribute}
+                        onPress={() => onContribute(goal)}
                         accessibilityRole="button"
                         accessibilityLabel={`Add money to ${goal.name}`}
                         hitSlop={8}
@@ -108,4 +109,4 @@ export function GoalCard({ goal, currency, onEdit, onDelete, onContribute }: Goa
             )}
         </View>
     );
-}
+});

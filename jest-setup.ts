@@ -88,6 +88,8 @@ jest.mock('burnt', () => ({
 jest.mock('react-native-reanimated', () => ({
   ...require('react-native-reanimated/mock'),
   useReducedMotion: () => false,
+  // The stock mock returns the raw value; module-level shared values (skeleton pulse) need a { value } box.
+  makeMutable: (value: unknown) => ({ value }),
 }));
 
 // NativeWind's color-scheme API needs the compiled Tailwind runtime, which
@@ -99,21 +101,6 @@ jest.mock('nativewind', () => {
     ...actual,
     useColorScheme: () => ({ colorScheme: 'light', setColorScheme, toggleColorScheme: jest.fn() }),
   };
-});
-
-// gifted-charts animates via raw setTimeout and can fire after the test
-// environment is torn down (crashing the worker). Our code is what's under
-// test, so render each chart as a View that exposes its data.
-jest.mock('react-native-gifted-charts', () => {
-  const React = require('react');
-  const { View } = require('react-native');
-  const chart = (name: string) => {
-    const Chart = (props: { data?: unknown[] }) =>
-      React.createElement(View, { testID: name, accessibilityHint: `${props.data?.length ?? 0} points` });
-    Chart.displayName = name;
-    return Chart;
-  };
-  return { BarChart: chart('BarChart'), LineChart: chart('LineChart'), PieChart: chart('PieChart') };
 });
 
 // Icon fonts are irrelevant in tests; render each icon as a Text with its name.

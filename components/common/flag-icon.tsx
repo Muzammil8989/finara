@@ -2,8 +2,13 @@ import React from 'react';
 import { View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const ALL_FLAGS = require('country-flag-icons/string/3x2/index.cjs') as Record<string, string>;
+// ~180 KB of SVG strings: loaded on first flag render, not at app start (the common barrel re-exports this file).
+let allFlags: Record<string, string> | null = null;
+function getFlags(): Record<string, string> {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    allFlags ??= require('country-flag-icons/string/3x2/index.cjs') as Record<string, string>;
+    return allFlags;
+}
 
 interface FlagIconProps {
     code: string;
@@ -11,7 +16,7 @@ interface FlagIconProps {
 }
 
 export function FlagIcon({ code, size = 28 }: FlagIconProps) {
-    const svg = ALL_FLAGS[code];
+    const svg = getFlags()[code];
     const width = Math.round(size * (3 / 2)); // 3x2 aspect ratio
     const height = size;
 

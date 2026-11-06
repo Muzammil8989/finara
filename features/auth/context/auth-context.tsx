@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import * as ScreenCapture from 'expo-screen-capture';
 import { logger } from '@/lib/logger';
@@ -109,8 +109,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const lock = useCallback(() => setIsLocked(true), []);
 
+    const value = useMemo(
+        () => ({ isLocked, isSecurityEnabled, unlock, lock, recheckSecurity, isLoading }),
+        [isLocked, isSecurityEnabled, unlock, lock, recheckSecurity, isLoading],
+    );
+
     return (
-        <AuthContext.Provider value={{ isLocked, isSecurityEnabled, unlock, lock, recheckSecurity, isLoading }}>
+        <AuthContext.Provider value={value}>
             {children}
         </AuthContext.Provider>
     );

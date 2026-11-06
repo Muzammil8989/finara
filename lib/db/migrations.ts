@@ -7,12 +7,32 @@ import { logger } from '../logger';
  * Supports incremental schema evolution while maintaining data integrity
  */
 
-const DATABASE_VERSION = 10; // Increment this when adding new migrations
+export const DATABASE_VERSION = 11; // Increment this when adding new migrations
+
+/**
+ * Thrown when the schema can't be brought to DATABASE_VERSION. The database
+ * is left exactly as it was (each migration runs in its own transaction, and
+ * nothing is ever dropped automatically), so the user's data stays on disk
+ * for a fixed app version or a backup to recover.
+ */
+export class DatabaseMigrationError extends Error {
+  constructor(
+    message: string,
+    /** 'downgrade': the file was written by a newer app. 'failed': a migration threw. */
+    readonly reason: 'downgrade' | 'failed',
+    readonly fromVersion: number,
+    readonly targetVersion: number,
+    readonly cause?: unknown
+  ) {
+    super(message);
+    this.name = 'DatabaseMigrationError';
+  }
+}
 
 /**
  * Migration interface for type safety
  */
-interface Migration {
+export interface Migration {
   version: number;
   up: (db: SQLite.SQLiteDatabase) => Promise<void>;
   description: string;
@@ -28,11 +48,7 @@ const migrations: Migration[] = [
     version: 1,
     description: 'Complete schema with all tables and default data',
     up: async (db: SQLite.SQLiteDatabase) => {
-      // PRAGMA journal_mode = WAL must be a standalone execAsync call on Android.
-      // Mixing it with DDL in a single batch causes NativeDatabase NullPointerException
-      // because the native layer tries to process the PRAGMA result row during a write.
-      await db.execAsync('PRAGMA journal_mode = WAL;');
-
+      // journal_mode=WAL is set in initializeDatabase, outside any transaction.
       await db.execAsync(`
         -- CATEGORIES TABLE
         CREATE TABLE IF NOT EXISTS categories (
@@ -375,6 +391,26 @@ const migrations: Migration[] = [
       await db.execAsync(`CREATE INDEX IF NOT EXISTS idx_transactions_savings_goal_id ON transactions(savings_goal_id);`);
     },
   },
+  {
+    version: 11,
+    description: 'Covering indexes for totals, budgets and balances; indexes on FKs used when deleting',
+    up: async (db: SQLite.SQLiteDatabase) => {
+      await db.execAsync(`
+        -- Budget spend by category and period (covers the SUM, no table lookups)
+        CREATE INDEX IF NOT EXISTS idx_transactions_category_type_date_amount ON transactions(category_id, type, date, amount);
+        -- Income/expense totals by date range and by month
+        CREATE INDEX IF NOT EXISTS idx_transactions_type_date_amount ON transactions(type, date, amount);
+        -- Per-account balances
+        CREATE INDEX IF NOT EXISTS idx_transactions_account_type_amount ON transactions(account_id, type, amount);
+        -- Lookups by linked transaction when a transaction is deleted
+        CREATE INDEX IF NOT EXISTS idx_loans_origin_transaction_id ON loans(origin_transaction_id);
+        CREATE INDEX IF NOT EXISTS idx_loans_transaction_id ON loans(transaction_id);
+        CREATE INDEX IF NOT EXISTS idx_loan_payments_transaction_id ON loan_payments(transaction_id);
+        CREATE INDEX IF NOT EXISTS idx_household_expenses_linked_transaction_id ON household_expenses(linked_transaction_id);
+        CREATE INDEX IF NOT EXISTS idx_recurring_category_id ON recurring_expenses(category_id);
+      `);
+    },
+  },
 ];
 
 /**
@@ -407,70 +443,69 @@ async function setDatabaseVersion(
 /**
  * Run all pending migrations
  * This is the main entry point for database initialization
+ *
+ * Each migration's up() and its user_version bump run in one exclusive
+ * transaction: a failure rolls that migration back and throws a
+ * DatabaseMigrationError, leaving the database at the last good version.
+ * Data is never dropped here. `migrationList` is overridable for tests only.
  */
-export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
-  try {
-    let currentVersion = await getDatabaseVersion(db);
+export async function runMigrations(
+  db: SQLite.SQLiteDatabase,
+  migrationList: readonly Migration[] = migrations
+): Promise<void> {
+  const target = migrationList.length ? migrationList[migrationList.length - 1].version : 0;
+  let currentVersion = await getDatabaseVersion(db);
 
-    logger.info(
-      `Database migration: current version ${currentVersion}, target version ${DATABASE_VERSION}`
-    );
+  logger.info(
+    `Database migration: current version ${currentVersion}, target version ${target}`
+  );
 
-    // If current version is higher than target, database is corrupted or from future version
-    if (currentVersion > DATABASE_VERSION) {
-      logger.warn(
-        `Database version ${currentVersion} is higher than expected ${DATABASE_VERSION}. Resetting database...`
-      );
-      await db.execAsync(`
-        DROP TABLE IF EXISTS loan_payments;
-        DROP TABLE IF EXISTS loans;
-        DROP TABLE IF EXISTS household_periods_history;
-        DROP TABLE IF EXISTS household_expenses;
-        DROP TABLE IF EXISTS household_config;
-        DROP TABLE IF EXISTS savings_goals;
-        DROP TABLE IF EXISTS transactions_new;
-        DROP TABLE IF EXISTS transactions;
-        DROP TABLE IF EXISTS recurring_expenses_new;
-        DROP TABLE IF EXISTS recurring_expenses;
-        DROP TABLE IF EXISTS budgets;
-        DROP TABLE IF EXISTS accounts;
-        DROP TABLE IF EXISTS categories;
-        PRAGMA user_version = 0;
-      `);
-      currentVersion = 0;
-      logger.info('Database reset complete. Running migrations...');
-    }
-
-    if (currentVersion === DATABASE_VERSION) {
-      logger.info('Database is up to date');
-      return;
-    }
-
-    // Run each migration sequentially
-    for (const migration of migrations) {
-      if (migration.version > currentVersion) {
-        logger.info(
-          `Running migration ${migration.version}: ${migration.description}`
-        );
-        try {
-          await migration.up(db);
-          await setDatabaseVersion(db, migration.version);
-          logger.info(`Migration ${migration.version} completed successfully`);
-        } catch (error) {
-          logger.error(
-            `Error running migration ${migration.version}:`,
-            error
-          );
-          throw new Error(`Migration ${migration.version} failed: ${error}`);
-        }
-      }
-    }
-
-    logger.info('All migrations completed successfully');
-  } catch (error) {
-    logger.error('Migration error:', error);
-    throw error;
+  // A newer app wrote this file (the user downgraded). Opening it with an
+  // older schema could corrupt it, and dropping it would lose their data.
+  if (currentVersion > target) {
+    const message =
+      `Database version ${currentVersion} is newer than this app supports (${target}). ` +
+      'Update the app to open your data; nothing was changed.';
+    logger.error(message);
+    throw new DatabaseMigrationError(message, 'downgrade', currentVersion, target);
   }
+
+  if (currentVersion === target) {
+    logger.info('Database is up to date');
+    return;
+  }
+
+  for (const migration of migrationList) {
+    if (migration.version <= currentVersion) continue;
+    logger.info(
+      `Running migration ${migration.version}: ${migration.description}`
+    );
+    try {
+      // Same connection, plain transaction: migrations run during SQLiteProvider's
+      // onInit, before anything else can query, so exclusivity isn't needed.
+      // withExclusiveTransactionAsync opens a second native connection, which
+      // could wait forever here and leave the app stuck on the splash screen.
+      await db.withTransactionAsync(async () => {
+        await migration.up(db);
+        await setDatabaseVersion(db, migration.version);
+      });
+    } catch (error) {
+      logger.error(`Error running migration ${migration.version}:`, error);
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new DatabaseMigrationError(
+        `Migration ${migration.version} (${migration.description}) failed and was rolled back; ` +
+          `the database is still at version ${currentVersion} and no data was removed. ${detail}`,
+        'failed',
+        currentVersion,
+        target,
+        error
+      );
+    }
+    currentVersion = migration.version;
+    logger.info(`Migration ${migration.version} completed successfully`);
+  }
+
+  logger.info('All migrations completed successfully');
 }
 
 /**
@@ -538,12 +573,24 @@ export async function initializeDatabase(
 ): Promise<void> {
   try {
     logger.info('Initializing database...');
+    // PRAGMA journal_mode = WAL must be a standalone execAsync call on Android,
+    // outside any transaction. Mixing it with DDL in a single batch causes a
+    // NativeDatabase NullPointerException because the native layer tries to
+    // process the PRAGMA result row during a write. WAL persists in the file;
+    // setting it on every open is cheap and covers files made elsewhere.
+    await db.execAsync('PRAGMA journal_mode = WAL;');
+    // Durable across app crashes in WAL mode, with far fewer fsyncs.
+    await db.execAsync('PRAGMA synchronous = NORMAL;');
+    await db.execAsync('PRAGMA temp_store = MEMORY;');
     await runMigrations(db);
     // SQLite ships with FK enforcement OFF per connection; without this every
     // ON DELETE CASCADE / SET NULL / RESTRICT in the schema is ignored.
     // Enabled after migrations because table rebuilds must run with FKs off.
     await db.execAsync('PRAGMA foreign_keys = ON;');
     await seedDatabase(db);
+    // Refresh planner statistics for the new indexes. Cheap: only analyzes
+    // tables whose stats are missing or stale.
+    await db.execAsync('PRAGMA optimize;');
     logger.info('Database initialization complete');
   } catch (error) {
     logger.error('Database initialization failed:', error);

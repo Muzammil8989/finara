@@ -1,6 +1,6 @@
 jest.unmock('@/lib/db/db-client');
 import { getDb } from '@/lib/db/db-client';
-import { clearDatabase } from '@/lib/db/migrations';
+import { clearDatabase, DATABASE_VERSION } from '@/lib/db/migrations';
 import * as q from '@/lib/db/queries';
 import { transactions } from '@/lib/db/schema';
 import { createTestDb, TestDb } from '@/tests/helpers/test-db';
@@ -18,8 +18,8 @@ describe('database integrity', () => {
     expect(db.raw.pragma('foreign_keys', { simple: true })).toBe(1);
   });
 
-  it('migrates to v10 with link columns', () => {
-    expect(db.raw.pragma('user_version', { simple: true })).toBe(10);
+  it('migrates to the latest version with link columns', () => {
+    expect(db.raw.pragma('user_version', { simple: true })).toBe(DATABASE_VERSION);
     expect(columns('transactions')).toEqual(expect.arrayContaining(['transfer_group', 'savings_goal_id']));
     expect(columns('loans')).toContain('origin_transaction_id');
     expect(columns('household_expenses')).toContain('linked_transaction_id');

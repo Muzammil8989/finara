@@ -1,47 +1,26 @@
-import { AppButton, EmptyState, ScreenHeader, SegmentedControl, ThemedText } from '@/components/common';
-import tokens from '@/theme/tokens';
+import { EmptyState, ScreenHeader, SegmentedControl, ThemedText } from '@/components/common';
+import { CategoryFormModal } from '@/features/categories/components/category-form-modal';
+import { CategoryRow } from '@/features/categories/components/category-row';
 import {
     Category,
-    createCategory,
     deleteCategory,
-    getCategories,
-    updateCategory
+    getCategories
 } from '@/lib/db/queries';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
-import { IoniconsName } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     InteractionManager,
-    KeyboardAvoidingView,
     Modal,
-    Platform,
     Pressable,
     ScrollView,
-    TextInput,
     View
 } from 'react-native';
-import Animated, { Easing, FadeInDown, FadeInUp, FadeOutDown } from 'react-native-reanimated';
+import Animated, { Easing, FadeInUp, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-const CATEGORY_COLORS: string[] = tokens.swatches;
-
-const EXPENSE_ICONS = [
-    'fast-food', 'cart', 'car', 'home', 'medical',
-    'fitness', 'shirt', 'cafe', 'game-controller', 'airplane',
-    'book', 'school', 'gift', 'paw', 'phone-portrait',
-    'bus', 'train', 'bicycle', 'restaurant', 'pizza',
-    'beer', 'film', 'musical-notes', 'barbell', 'footsteps'
-] as const;
-
-const INCOME_ICONS = [
-    'cash', 'wallet', 'trending-up', 'briefcase', 'card',
-    'gift', 'rocket', 'trophy', 'star', 'diamond-outline',
-    'business', 'medal-outline', 'ribbon-outline', 'flash', 'bulb-outline'
-] as const;
 
 function DeleteConfirmSheet({
     category,
@@ -120,17 +99,13 @@ export default function CategoriesScreen() {
     const [categories, setCategories] = useState<Category[]>([]);
     const [loading, setLoading] = useState(true);
     const [modalVisible, setModalVisible] = useState(false);
+    // Bumped on every open so the form sheet remounts with fresh state.
+    const [formKey, setFormKey] = useState(0);
     const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+    const [newCategoryType, setNewCategoryType] = useState<'income' | 'expense'>('expense');
     const [activeTab, setActiveTab] = useState<'expense' | 'income'>('expense');
     const [deletingCategory, setDeletingCategory] = useState<Category | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
-
-    // Form state
-    const [name, setName] = useState('');
-    const [type, setType] = useState<'income' | 'expense'>('expense');
-    const [selectedColor, setSelectedColor] = useState(CATEGORY_COLORS[0]);
-    const [selectedIcon, setSelectedIcon] = useState<string>('wallet');
-    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const fetchCategories = useCallback(async () => {
         try {
@@ -155,66 +130,29 @@ export default function CategoriesScreen() {
         return () => task.cancel();
     }, [fetchCategories]);
 
-    const openAddModal = (categoryType: 'income' | 'expense') => {
+    const openAddModal = useCallback((categoryType: 'income' | 'expense') => {
         setEditingCategory(null);
-        setName('');
-        setType(categoryType);
-        setSelectedColor(CATEGORY_COLORS[0]);
-        setSelectedIcon(categoryType === 'income' ? 'wallet' : 'fast-food');
+        setNewCategoryType(categoryType);
+        setFormKey(k => k + 1);
         setModalVisible(true);
-    };
+    }, []);
 
-    const openEditModal = (category: Category) => {
+    const openEditModal = useCallback((category: Category) => {
         setEditingCategory(category);
-        setName(category.name);
-        setType(category.type);
-        setSelectedColor(category.color || CATEGORY_COLORS[0]);
-        setSelectedIcon(category.icon || (category.type === 'income' ? 'wallet' : 'fast-food'));
+        setFormKey(k => k + 1);
         setModalVisible(true);
-    };
+    }, []);
 
-    const handleSave = async () => {
-        if (!name.trim()) {
-            toast.error('Please enter a category name');
-            return;
-        }
+    const closeModal = useCallback(() => setModalVisible(false), []);
 
-        setIsSubmitting(true);
-        try {
-            if (editingCategory) {
-                await updateCategory(editingCategory.id, {
-                    name: name.trim(),
-                    type,
-                    color: selectedColor,
-                    icon: selectedIcon,
-                });
-                toast.success('Category updated');
-            } else {
-                await createCategory({
-                    name: name.trim(),
-                    type,
-                    color: selectedColor,
-                    icon: selectedIcon,
-                });
-                toast.success('Category added');
-            }
-            setModalVisible(false);
-            fetchCategories();
-        } catch (error: any) {
-            logger.error('Error saving category:', error);
-            if (error.message?.includes('UNIQUE constraint failed')) {
-                toast.error('A category with this name already exists');
-            } else {
-                toast.error(error.message || 'Failed to save category');
-            }
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
+    const handleSaved = useCallback(() => {
+        setModalVisible(false);
+        fetchCategories();
+    }, [fetchCategories]);
 
-    const handleDelete = (category: Category) => {
+    const handleDelete = useCallback((category: Category) => {
         setDeletingCategory(category);
-    };
+    }, []);
 
     const handleConfirmDelete = async () => {
         if (!deletingCategory) return;
@@ -232,159 +170,8 @@ export default function CategoriesScreen() {
         }
     };
 
-    const expenseCategories = categories.filter(c => c.type === 'expense');
-    const incomeCategories = categories.filter(c => c.type === 'income');
-
-    const renderModal = () => {
-        const iconList = type === 'income' ? INCOME_ICONS : EXPENSE_ICONS;
-
-        return (
-            <Modal
-                visible={modalVisible}
-                animationType="slide"
-                transparent={true}
-                onRequestClose={() => setModalVisible(false)}
-            >
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}
-                >
-                    <Animated.View
-                        entering={FadeInDown.duration(350)}
-                        className="bg-surface dark:bg-dark-surface rounded-t-3xl px-6 pt-4 max-h-[90%]"
-                        style={{ paddingBottom: insets.bottom + 40 }}
-                    >
-                        <View className="w-9 h-1 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-5" />
-                        <View className="flex-row justify-between items-center mb-8">
-                            <ThemedText type="title" className="text-2xl font-bold">
-                                {editingCategory ? 'Edit Category' : 'Add Category'}
-                            </ThemedText>
-                            <Pressable onPress={() => setModalVisible(false)} className="p-2">
-                                <Ionicons name="close" size={24} color={colors.expense} />
-                            </Pressable>
-                        </View>
-
-                        <ScrollView
-                            showsVerticalScrollIndicator={false}
-                            keyboardShouldPersistTaps="handled"
-                            contentContainerStyle={{ paddingBottom: 24 }}
-                        >
-                            {/* Type Toggle (only when adding new) */}
-                            {!editingCategory && (
-                                <View className="mb-6">
-                                    <View className="flex-row p-1 rounded-xl" style={{ backgroundColor: colors.backgroundAlt }}>
-                                        <Pressable
-                                            onPress={() => {
-                                                setType('expense');
-                                                setSelectedIcon('fast-food');
-                                            }}
-                                            className="flex-1 py-3.5 rounded-xl"
-                                            style={type === 'expense' ? { backgroundColor: colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 2, elevation: 1 } : undefined}
-                                        >
-                                            <ThemedText
-                                                className="text-sm font-bold text-center"
-                                                style={{ color: type === 'expense' ? colors.error : colors.textMuted }}
-                                            >
-                                                Expense
-                                            </ThemedText>
-                                        </Pressable>
-                                        <Pressable
-                                            onPress={() => {
-                                                setType('income');
-                                                setSelectedIcon('wallet');
-                                            }}
-                                            className="flex-1 py-3.5 rounded-xl"
-                                            style={type === 'income' ? { backgroundColor: colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 2, elevation: 1 } : undefined}
-                                        >
-                                            <ThemedText
-                                                className="text-sm font-bold text-center"
-                                                style={{ color: type === 'income' ? colors.success : colors.textMuted }}
-                                            >
-                                                Income
-                                            </ThemedText>
-                                        </Pressable>
-                                    </View>
-                                </View>
-                            )}
-
-                            {/* Name Input */}
-                            <View className="mb-6">
-                                <ThemedText type="kicker" className="mb-2">
-                                    Category Name
-                                </ThemedText>
-                                <TextInput
-                                    value={name}
-                                    onChangeText={setName}
-                                    placeholder={type === 'income' ? 'e.g., Salary, Freelance' : 'e.g., Food, Transport'}
-                                    placeholderTextColor={colors.textMuted}
-                                    className="w-full rounded-xl px-6 py-4 text-textPrimary dark:text-dark-textPrimary text-base font-semibold"
-                                    style={{ backgroundColor: colors.backgroundAlt, fontFamily: 'PlusJakartaSans_600SemiBold' }}
-                                />
-                            </View>
-
-                            {/* Icon Selection */}
-                            <View className="mb-6">
-                                <ThemedText type="kicker" className="mb-3">
-                                    Icon
-                                </ThemedText>
-                                <View className="flex-row flex-wrap gap-3">
-                                    {iconList.map((icon) => (
-                                        <Pressable
-                                            key={icon}
-                                            onPress={() => setSelectedIcon(icon)}
-                                            className="w-14 h-14 rounded-xl items-center justify-center"
-                                            style={{ backgroundColor: selectedIcon === icon ? colors.primary : colors.backgroundAlt }}
-                                        >
-                                            <Ionicons
-                                                name={icon}
-                                                size={24}
-                                                color={selectedIcon === icon ? colors.white : colors.textMuted}
-                                            />
-                                        </Pressable>
-                                    ))}
-                                </View>
-                            </View>
-
-                            {/* Color Selection */}
-                            <View className="mb-8">
-                                <ThemedText type="kicker" className="mb-3">
-                                    Color
-                                </ThemedText>
-                                <View className="flex-row flex-wrap gap-3">
-                                    {CATEGORY_COLORS.map((color) => (
-                                        <Pressable
-                                            key={color}
-                                            onPress={() => setSelectedColor(color)}
-                                            accessibilityRole="radio"
-                                            accessibilityState={{ selected: selectedColor === color }}
-                                            className="w-14 h-14 rounded-xl items-center justify-center"
-                                            style={{
-                                                backgroundColor: color,
-                                                borderWidth: selectedColor === color ? 3 : 0,
-                                                borderColor: colors.textPrimary,
-                                            }}
-                                        >
-                                            {selectedColor === color && (
-                                                <Ionicons name="checkmark" size={24} color={colors.white} />
-                                            )}
-                                        </Pressable>
-                                    ))}
-                                </View>
-                            </View>
-
-                            <AppButton
-                                label={`${editingCategory ? 'Update' : 'Add'} Category`}
-                                onPress={handleSave}
-                                loading={isSubmitting}
-                                disabled={isSubmitting}
-                                color={type === 'income' ? colors.success : colors.error}
-                            />
-                        </ScrollView>
-                    </Animated.View>
-                </KeyboardAvoidingView>
-            </Modal>
-        );
-    };
+    const expenseCategories = useMemo(() => categories.filter(c => c.type === 'expense'), [categories]);
+    const incomeCategories = useMemo(() => categories.filter(c => c.type === 'income'), [categories]);
 
     const renderCategoryList = (categoryList: Category[], categoryType: 'income' | 'expense') => {
         if (categoryList.length === 0) {
@@ -403,65 +190,23 @@ export default function CategoriesScreen() {
 
         return (
             <View className="gap-3 px-5">
-                {categoryList.map((category, index) => {
-                    const categoryIcon = category.icon || (categoryType === 'income' ? 'wallet' : 'fast-food');
-                    return (
-                        <Animated.View
-                            key={category.id}
-                            entering={FadeInDown.delay(index * 50).springify()}
-                            className="bg-surface dark:bg-dark-surface border border-divider dark:border-dark-divider rounded-xl p-4"
-                        >
-                            <View className="flex-row items-center">
-                                <View className="w-9 h-9 items-center justify-center mr-4">
-                                    <Ionicons
-                                        name={categoryIcon as IoniconsName}
-                                        size={24}
-                                        color={category.color || (categoryType === 'income' ? colors.success : colors.primary)}
-                                    />
-                                </View>
-                                <View className="flex-1">
-                                    <ThemedText className="text-lg font-bold mb-1">
-                                        {category.name}
-                                    </ThemedText>
-                                    <ThemedText
-                                        className="text-sm font-semibold"
-                                        style={{ color: categoryType === 'income' ? colors.success : colors.error }}
-                                    >
-                                        {categoryType === 'income' ? 'Income' : 'Expense'}
-                                    </ThemedText>
-                                </View>
-                                <View className="flex-row gap-2">
-                                    <Pressable
-                                        onPress={() => openEditModal(category)}
-                                        className="w-10 h-10 rounded-xl items-center justify-center"
-                                        style={{ borderWidth: 1, borderColor: colors.borderStrong }}
-                                    >
-                                        <Ionicons name="create-outline" size={20} color={colors.primary} />
-                                    </Pressable>
-                                    <Pressable
-                                        onPress={() => handleDelete(category)}
-                                        className="w-10 h-10 rounded-xl items-center justify-center"
-                                        style={{ borderWidth: 1, borderColor: colors.borderStrong }}
-                                    >
-                                        <Ionicons name="trash-outline" size={20} color={colors.expense} />
-                                    </Pressable>
-                                </View>
-                            </View>
-                        </Animated.View>
-                    );
-                })}
+                {categoryList.map((category, index) => (
+                    <CategoryRow
+                        key={category.id}
+                        category={category}
+                        index={index}
+                        onEdit={openEditModal}
+                        onDelete={handleDelete}
+                    />
+                ))}
             </View>
         );
     };
 
     return (
         <View className="flex-1 bg-background dark:bg-dark-background">
-            <ScrollView
-                className="flex-1"
-                style={{ paddingTop: insets.top }}
-                contentContainerStyle={{ paddingBottom: 100 }}
-                contentInsetAdjustmentBehavior="automatic"
-            >
+            {/* Header stays put; only the content below it scrolls */}
+            <View style={{ paddingTop: insets.top }}>
                 <ScreenHeader
                     title="Categories"
                     right={
@@ -474,7 +219,11 @@ export default function CategoriesScreen() {
                         </Pressable>
                     }
                 />
-
+            </View>
+            <ScrollView
+                className="flex-1"
+                contentContainerStyle={{ paddingBottom: 100 }}
+            >
                 {/* Tabs */}
                 <SegmentedControl
                     options={[
@@ -500,7 +249,14 @@ export default function CategoriesScreen() {
                 )}
             </ScrollView>
 
-            {renderModal()}
+            <CategoryFormModal
+                key={formKey}
+                visible={modalVisible}
+                editingCategory={editingCategory}
+                defaultType={newCategoryType}
+                onClose={closeModal}
+                onSaved={handleSaved}
+            />
             {deletingCategory && (
                 <DeleteConfirmSheet
                     category={deletingCategory}

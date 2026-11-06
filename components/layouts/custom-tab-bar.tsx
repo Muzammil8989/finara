@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Svg, { Path } from 'react-native-svg';
@@ -68,7 +68,7 @@ function TabIcon({ name, color }: { name: IconName; color: string }) {
   );
 }
 
-export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+export const CustomTabBar = memo(function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const theme = useThemeColors();
   const insets = useSafeAreaInsets();
   const bottomInset = Math.max(insets.bottom, 8);
@@ -138,6 +138,9 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
               ]}
               numberOfLines={1}
               ellipsizeMode="clip"
+              maxFontSizeMultiplier={1.2}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
             >
               {config.label}
             </Text>
@@ -146,7 +149,7 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
       })}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -159,7 +162,8 @@ const styles = StyleSheet.create({
     flexBasis: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    height: TAB_BAR_HEIGHT,
+    // minHeight (not height) so large system font sizes can grow the bar instead of clipping.
+    minHeight: TAB_BAR_HEIGHT,
     paddingHorizontal: 2,
     position: 'relative',
   },

@@ -21,7 +21,7 @@ import {
 import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import { ActivityIndicator, AppState, LogBox, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, InteractionManager, LogBox, StyleSheet, TextInput, View } from 'react-native';
 import Animated, {
   Easing,
   runOnJS,
@@ -32,7 +32,7 @@ import Animated, {
 import '../global.css';
 
 import { ErrorBoundary, LockScreen, ObscuredContent } from '@/components/layouts';
-import { ThemedText } from '@/components/common';
+import { ErrorRetry, ThemedText } from '@/components/common';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { darkColors, lightColors } from '@/theme/colors';
 import { MAX_CONTENT_WIDTH } from '@/hooks/use-content-width';
@@ -43,32 +43,49 @@ import { AuthProvider, useAuth } from '@/features/auth/context/auth-context';
 import { ModalProvider, useModalActions } from '@/providers/modal-context';
 import { UserProvider, useUser } from '@/features/user/context/user-context';
 import { setDbInstance } from '@/lib/db/db-client';
-import { clearDatabase, initializeDatabase } from '@/lib/db/migrations';
-import { useEffect, useRef, useState } from 'react';
+import { DatabaseMigrationError, initializeDatabase } from '@/lib/db/migrations';
+import React, { useEffect, useRef, useState } from 'react';
 import * as Notifications from 'expo-notifications';
 import { NotificationService } from '@/features/notifications/services/notification-service';
-import { BackupService } from '@/features/backup/services/backup-service';
 import { processRecurringTransactions } from '@/features/recurring/services/recurring-processor';
 
 const PRIMARY_COLOR = lightColors.primary;
+const OVERLAY_FADE_MS = 220;
+const AUTO_BACKUP_DELAY_MS = 1500;
+const DB_OPEN_TIMEOUT_MS = 20_000;
+const SPLASH_FAILSAFE_MS = 10_000;
+
+/** What has finished during launch; logged by the splash failsafe. */
+const startupProgress = { fonts: false, database: false, auth: false, profile: false };
+
+/**
+ * Run non-urgent launch work once the first interactions/animations settle,
+ * plus an optional delay, so it never competes with the first frames.
+ */
+function runAfterStartup(fn: () => void, delayMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const task = InteractionManager.runAfterInteractions(() => {
+    timer = setTimeout(fn, delayMs);
+  });
+  return {
+    cancel: () => {
+      task.cancel();
+      if (timer) clearTimeout(timer);
+    },
+  };
+}
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
+// Migrations run in transactions, so a failure leaves the data as it was.
+// The error surfaces in DatabaseGate (retry screen) instead of wiping the DB.
 const initDb = async (db: SQLiteDatabase) => {
   try {
     await initializeDatabase(db);
     setDbInstance(db);
   } catch (e) {
-    logger.error('Database initialization failed, attempting cleanup...', e);
-    try {
-      await clearDatabase(db);
-      await initializeDatabase(db);
-      setDbInstance(db);
-      logger.info('Database recovered from corruption');
-    } catch (cleanupError) {
-      logger.error('Failed to recover database:', cleanupError);
-      throw cleanupError;
-    }
+    logger.error('Database initialization failed', e);
+    throw e;
   }
 };
 
@@ -85,6 +102,8 @@ LogBox.ignoreLogs([
   ...((TextInput as unknown as { defaultProps?: Record<string, unknown> }).defaultProps ?? {}),
   underlineColorAndroid: 'transparent',
   selectionColor: PRIMARY_COLOR,
+  // Same cap as ThemedText, so large amount inputs don't overflow at 2x system font size.
+  maxFontSizeMultiplier: 1.3,
 };
 
 try {
@@ -125,6 +144,8 @@ function RootLayoutContent() {
   const { isLocked, isSecurityEnabled, isLoading: isAuthLoading } = useAuth();
   const { profile, isLoading: isUserLoading } = useUser();
   const isLoading = isAuthLoading || isUserLoading;
+  startupProgress.auth = !isAuthLoading;
+  startupProgress.profile = !isUserLoading;
 
   // Keep the native splash up until the user profile (which carries the
   // theme preference) has actually loaded. Hiding the splash on fonts-loaded
@@ -151,7 +172,11 @@ function RootLayoutContent() {
     // One-time cleanup of legacy "WealthFlow" daily reminder left over from
     // pre-rebrand builds. Without this, existing users get duplicate 9 PM
     // notifications (legacy + new) until they reschedule via settings.
-    Notifications.cancelScheduledNotificationAsync('wf-daily-reminder').catch(() => {});
+    // Deferred so the native call doesn't compete with the first frames.
+    const task = InteractionManager.runAfterInteractions(() => {
+      Notifications.cancelScheduledNotificationAsync('wf-daily-reminder').catch(() => {});
+    });
+    return () => task.cancel();
   }, []);
 
   // App-wide auto-backup. Runs whenever the app is opened or brought back to the
@@ -161,17 +186,24 @@ function RootLayoutContent() {
   useEffect(() => {
     if (isLoading) return;
 
+    // Loaded lazily: a due backup reads every table and serialises it, which
+    // must not land on the first frames after launch.
     const checkAutoBackup = () => {
-      BackupService.runAutoBackupIfNeeded().catch((error) => {
-        logger.error('Auto-backup check failed', error);
-      });
+      import('@/features/backup/services/backup-service')
+        .then(({ BackupService }) => BackupService.runAutoBackupIfNeeded())
+        .catch((error) => {
+          logger.error('Auto-backup check failed', error);
+        });
     };
 
-    checkAutoBackup();
+    const startup = runAfterStartup(checkAutoBackup, AUTO_BACKUP_DELAY_MS);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') checkAutoBackup();
     });
-    return () => sub.remove();
+    return () => {
+      startup.cancel();
+      sub.remove();
+    };
   }, [isLoading]);
 
   // Book due recurring bills/income on launch and whenever the app returns to
@@ -186,11 +218,14 @@ function RootLayoutContent() {
       });
     };
 
-    runRecurring();
+    const startup = runAfterStartup(runRecurring, 0);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') runRecurring();
     });
-    return () => sub.remove();
+    return () => {
+      startup.cancel();
+      sub.remove();
+    };
   }, [isLoading, profile.isOnboarded, triggerRefresh]);
 
   // Effect 1: once mounted and data loaded, resolve the initial route then fade the overlay.
@@ -219,17 +254,21 @@ function RootLayoutContent() {
       '/terms',
       '/privacy',
     ] as const;
-    PREFETCH_ROUTES.forEach((path) => {
-      try { router.prefetch(path as never); } catch { /* harmless if route doesn't exist yet */ }
-    });
+    // After the overlay fade, so prefetching doesn't drop frames from it.
+    const prefetch = runAfterStartup(() => {
+      PREFETCH_ROUTES.forEach((path) => {
+        try { router.prefetch(path as never); } catch { /* harmless if route doesn't exist yet */ }
+      });
+    }, OVERLAY_FADE_MS);
 
     overlayOpacity.value = withTiming(
       0,
-      { duration: 380, easing: Easing.out(Easing.quad) },
+      { duration: OVERLAY_FADE_MS, easing: Easing.out(Easing.quad) },
       (finished) => {
         if (finished) runOnJS(setOverlayVisible)(false);
       },
     );
+    return () => prefetch.cancel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, isLoading]);
 
@@ -358,8 +397,79 @@ function RootLayoutContent() {
   );
 }
 
+/**
+ * Opens the database and runs migrations. A failed migration is rolled back
+ * and reported here with a retry: user data is never wiped automatically.
+ */
+function DatabaseGate({ children }: { children: React.ReactNode }) {
+  const [error, setError] = useState<Error | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [ready, setReady] = useState(false);
+
+  // Stable identity: SQLiteProvider re-opens the database whenever onInit changes.
+  const onInit = React.useCallback(async (db: SQLiteDatabase) => {
+    await initDb(db);
+    startupProgress.database = true;
+    setReady(true);
+  }, []);
+
+  // Watchdog: never leave the user on the splash screen if opening the
+  // database stalls. Show the retry screen instead.
+  useEffect(() => {
+    if (ready || error) return;
+    const timer = setTimeout(() => {
+      logger.error(`Database did not open within ${DB_OPEN_TIMEOUT_MS} ms`);
+      setError(new Error('Database open timed out'));
+    }, DB_OPEN_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [ready, error, attempt]);
+
+  if (error) {
+    // A file written by a newer app version can't be opened by this one; retrying won't help.
+    const isDowngrade = error instanceof DatabaseMigrationError && error.reason === 'downgrade';
+    return (
+      <DatabaseErrorScreen
+        message={
+          isDowngrade
+            ? 'Your data was saved by a newer version of Folio. Please update the app to open it. Nothing has been deleted.'
+            : "Folio couldn't open your data. Nothing has been deleted. Try again, or restart the app."
+        }
+        onRetry={() => {
+          setError(null);
+          setReady(false);
+          setAttempt(a => a + 1);
+        }}
+      />
+    );
+  }
+
+  return (
+    <SQLiteProvider key={attempt} databaseName="wealthflow.db" onInit={onInit} onError={setError}>
+      {children}
+    </SQLiteProvider>
+  );
+}
+
+function DatabaseErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const colorScheme = useColorScheme();
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+  return (
+    <View
+      style={{
+        flex: 1,
+        justifyContent: 'center',
+        backgroundColor: colorScheme === 'dark' ? APP_DARK_BG : APP_LIGHT_BG,
+      }}
+    >
+      <ErrorRetry message={message} onRetry={onRetry} />
+    </View>
+  );
+}
+
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     PlayfairDisplay_400Regular_Italic,
     PlayfairDisplay_600SemiBold,
     PlayfairDisplay_700Bold,
@@ -378,20 +488,42 @@ export default function RootLayout() {
   // once the user profile (and therefore the theme) is loaded, to avoid the
   // boot-time light/dark flash.
 
-  if (!fontsLoaded) return null;
+  // Fonts no longer gate the providers: SecureStore reads (auth, profile),
+  // migrations and font loading all run in parallel behind the splash. Only
+  // the visible UI waits for fonts. A font failure falls back to system fonts
+  // instead of leaving the app blank.
+  const fontsReady = fontsLoaded || !!fontError;
 
+  useEffect(() => {
+    if (fontError) logger.error('Font loading failed, using system fonts', fontError);
+  }, [fontError]);
+
+  // Failsafe: never leave the user staring at the native splash. If startup
+  // hasn't finished after this long, hide it so whatever is underneath (an
+  // error screen, a spinner) is visible, and log which step is still pending.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      logger.error(`Startup still pending after ${SPLASH_FAILSAFE_MS} ms`, startupProgress);
+      SplashScreen.hideAsync().catch(() => {});
+    }, SPLASH_FAILSAFE_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  startupProgress.fonts = fontsReady;
+
+  // Auth and profile live in SecureStore, not SQLite, so they sit above the
+  // database gate and load while migrations run.
   return (
     <ErrorBoundary>
       <SafeAreaProvider>
-        <SQLiteProvider databaseName="wealthflow.db" onInit={initDb}>
-          <AuthProvider>
-            <UserProvider>
+        <AuthProvider>
+          <UserProvider>
+            <DatabaseGate>
               <ModalProvider>
-                <RootLayoutContent />
+                {fontsReady ? <RootLayoutContent /> : null}
               </ModalProvider>
-            </UserProvider>
-          </AuthProvider>
-        </SQLiteProvider>
+            </DatabaseGate>
+          </UserProvider>
+        </AuthProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
   );

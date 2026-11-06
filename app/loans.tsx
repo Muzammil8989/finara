@@ -7,11 +7,11 @@ import { DeleteConfirmSheet } from '@/features/loans/components/delete-confirm-s
 import { useLoans } from '@/features/loans/hooks/use-loans';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useUser } from '@/features/user/context/user-context';
-import { useModals } from '@/providers/modal-context';
+import { useModalActions } from '@/providers/modal-context';
 import { deleteLoan, transferLoanToAccount, LoanWithDetails } from '@/lib/db/queries';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -27,11 +27,11 @@ export default function LoansScreen() {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const { profile } = useUser();
-  const { triggerRefresh } = useModals();
+  const { triggerRefresh } = useModalActions();
   const currencyCode = profile.currency;
 
   const [filter, setFilter] = useState<FilterTab>('all');
-  const { loans, summary, categoryIds, loading, refresh } = useLoans(filter);
+  const { loans, summary, categoryIds, loading } = useLoans(filter);
 
   const [addVisible, setAddVisible] = useState(false);
   const [editingLoan, setEditingLoan] = useState<LoanWithDetails | null>(null);
@@ -44,23 +44,23 @@ export default function LoansScreen() {
     setAddVisible(true);
   };
 
-  const handleOpenEdit = (loan: LoanWithDetails) => {
+  // Stable callbacks so memoized LoanItem rows don't re-render on unrelated state changes.
+  const handleOpenEdit = useCallback((loan: LoanWithDetails) => {
     setEditingLoan(loan);
     setAddVisible(true);
-  };
+  }, []);
 
-  const handleTransfer = async (loan: LoanWithDetails) => {
+  const handleTransfer = useCallback(async (loan: LoanWithDetails) => {
     if (!categoryIds) return;
     try {
       await transferLoanToAccount(loan.id, categoryIds);
       toast.success('Transferred to account');
-      refresh();
       triggerRefresh();
     } catch (e) {
       logger.error('LoansScreen: transfer failed', e);
       toast.error(e instanceof Error && e.message === 'Loan is not fully repaid yet' ? e.message : 'Transfer failed');
     }
-  };
+  }, [categoryIds, triggerRefresh]);
 
   const handleConfirmDelete = async () => {
     if (!deletingLoan) return;
@@ -69,7 +69,6 @@ export default function LoansScreen() {
       await deleteLoan(deletingLoan.id);
       toast.success('Loan deleted');
       setDeletingLoan(null);
-      refresh();
       triggerRefresh();
     } catch (e) {
       logger.error('LoansScreen: delete failed', e);
@@ -88,17 +87,18 @@ export default function LoansScreen() {
   return (
     <View className="flex-1 bg-background dark:bg-dark-background">
 
-      <ScrollView
-        className="flex-1"
-        style={{ paddingTop: insets.top }}
-        contentContainerStyle={{ paddingBottom: 120 }}
-        showsVerticalScrollIndicator={false}
-      >
+      {/* Header stays put; only the content below it scrolls */}
+      <View style={{ paddingTop: insets.top }}>
         <ScreenHeader
           title="Loans & Borrowings"
           subtitle="Track money given and taken"
         />
-
+      </View>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Summary Card */}
         <LoanSummaryCard summary={summary} currencyCode={currencyCode} />
 
@@ -162,8 +162,8 @@ export default function LoansScreen() {
                 loan={loan}
                 currencyCode={currencyCode}
                 onEdit={handleOpenEdit}
-                onDelete={(l) => setDeletingLoan(l)}
-                onRecordPayment={(l) => setPaymentLoan(l)}
+                onDelete={setDeletingLoan}
+                onRecordPayment={setPaymentLoan}
                 onTransfer={handleTransfer}
               />
             ))}
@@ -178,23 +178,24 @@ export default function LoansScreen() {
         style={{ position: 'absolute', bottom: insets.bottom + 24, right: 20 }}
       />
 
-      {/* Modals */}
-      {categoryIds && (
+      {/* Modals — mounted only while open. BottomSheet runs its exit animation
+          before calling onClose, so unmounting afterwards doesn't cut it short. */}
+      {categoryIds && addVisible && (
         <AddLoanModal
           visible={addVisible}
           onClose={() => { setAddVisible(false); setEditingLoan(null); }}
-          onSuccess={() => { setAddVisible(false); setEditingLoan(null); refresh(); triggerRefresh(); }}
+          onSuccess={() => { setAddVisible(false); setEditingLoan(null); triggerRefresh(); }}
           editingLoan={editingLoan}
           currencyCode={currencyCode}
           categoryIds={categoryIds}
         />
       )}
 
-      {categoryIds && (
+      {categoryIds && paymentLoan !== null && (
         <RecordPaymentModal
-          visible={paymentLoan !== null}
+          visible
           onClose={() => setPaymentLoan(null)}
-          onSuccess={() => { setPaymentLoan(null); refresh(); triggerRefresh(); }}
+          onSuccess={() => { setPaymentLoan(null); triggerRefresh(); }}
           loan={paymentLoan}
           currencyCode={currencyCode}
           categoryIds={categoryIds}

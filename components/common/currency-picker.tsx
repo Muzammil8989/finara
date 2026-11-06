@@ -1,4 +1,5 @@
 import { POPULAR_CURRENCIES } from '@/features/user/services/user-service';
+import { MAX_CONTENT_WIDTH } from '@/hooks/use-content-width';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { borderRadius } from '@/theme/border-radius';
 import { shadows } from '@/theme/shadows';
@@ -6,15 +7,15 @@ import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useMemo, useState } from 'react';
-import { Keyboard, Modal, ScrollView, TextInput, View } from 'react-native';
+import { Keyboard, Modal, ScrollView, TextInput, useWindowDimensions, View } from 'react-native';
 import { Pressable } from './pressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
   FadeIn,
-  FadeInLeft,
   FadeOut,
   runOnJS,
+  useAnimatedKeyboard,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -46,10 +47,21 @@ export function CurrencyPicker({ value, onSelect, variant = 'card' }: CurrencyPi
   const triggerScale = useSharedValue(1);
   const triggerAnimStyle = useAnimatedStyle(() => ({ transform: [{ scale: triggerScale.value }] }));
 
-  // Sheet animation
-  const sheetY = useSharedValue(800);
+  // Sheet animation — offsets come from the real window height (rotation / tall phones / tablets)
+  const { height: windowHeight } = useWindowDimensions();
+  const topInset = insets.top;
+  const sheetY = useSharedValue(windowHeight);
   const backdropOpacity = useSharedValue(0);
-  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.value }] }));
+  // Lift the sheet above the keyboard while the search field is focused, and shrink it
+  // so the header + search field never get pushed above the top of the screen.
+  const keyboard = useAnimatedKeyboard();
+  const sheetStyle = useAnimatedStyle(() => {
+    const keyboardLift = keyboard.height.value;
+    return {
+      transform: [{ translateY: sheetY.value - keyboardLift }],
+      maxHeight: Math.min(windowHeight * 0.88, windowHeight - keyboardLift - topInset),
+    };
+  });
   const backdropStyle = useAnimatedStyle(() => ({ opacity: backdropOpacity.value }));
 
   const selectedCurrency = POPULAR_CURRENCIES.find((c) => c.code === value) || POPULAR_CURRENCIES[0];
@@ -72,7 +84,7 @@ export function CurrencyPicker({ value, onSelect, variant = 'card' }: CurrencyPi
 
   const openModal = () => {
     setIsVisible(true);
-    sheetY.value = 800;
+    sheetY.value = windowHeight;
     backdropOpacity.value = 0;
     sheetY.value = withTiming(0, { duration: 340, easing: Easing.out(Easing.cubic) });
     backdropOpacity.value = withTiming(1, { duration: 300 });
@@ -86,7 +98,7 @@ export function CurrencyPicker({ value, onSelect, variant = 'card' }: CurrencyPi
 
   const closeModal = () => {
     Keyboard.dismiss();
-    sheetY.value = withTiming(800, { duration: 280, easing: Easing.in(Easing.cubic) }, (done) => {
+    sheetY.value = withTiming(windowHeight, { duration: 280, easing: Easing.in(Easing.cubic) }, (done) => {
       if (done) runOnJS(dismissModal)();
     });
     backdropOpacity.value = withTiming(0, { duration: 260 });
@@ -140,8 +152,12 @@ export function CurrencyPicker({ value, onSelect, variant = 'card' }: CurrencyPi
         <Animated.View style={[{ flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' }, backdropStyle]}>
           <Pressable style={{ flex: 1 }} onPress={closeModal} />
           <Animated.View
-            style={[sheetStyle, { ...shadows.lg, shadowColor: colors.black, shadowOffset: { width: 0, height: -4 }, elevation: 16, paddingBottom: insets.bottom + 24 }]}
-            className="bg-surface dark:bg-dark-surface rounded-t-3xl px-6 pt-4 overflow-hidden max-h-[88%]"
+            style={[sheetStyle, {
+              // Same reading column as the app on tablets / landscape.
+              width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center',
+              ...shadows.lg, shadowColor: colors.black, shadowOffset: { width: 0, height: -4 }, elevation: 16, paddingBottom: insets.bottom + 24,
+            }]}
+            className="bg-surface dark:bg-dark-surface rounded-t-3xl px-6 pt-4 overflow-hidden"
           >
 
             {/* Drag handle — M3 spec: 32dp wide, 4dp tall */}
@@ -251,7 +267,7 @@ export function CurrencyPicker({ value, onSelect, variant = 'card' }: CurrencyPi
             </Animated.View>
 
             {/* Currency List */}
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {filteredCurrencies.length === 0 ? (
                 <View className="py-20 items-center gap-3">
                   <View style={{
@@ -267,67 +283,63 @@ export function CurrencyPicker({ value, onSelect, variant = 'card' }: CurrencyPi
                   </ThemedText>
                 </View>
               ) : (
-                filteredCurrencies.map((item, index) => {
+                filteredCurrencies.map((item) => {
                   const isSelected = item.code === value;
+                  // No per-row layout animations: with ~150 rows they stall every keystroke.
                   return (
-                    <Animated.View
-                      key={`${activeTab}-${item.code}`}
-                      entering={FadeInLeft.delay(index * 20).duration(250).easing(Easing.out(Easing.cubic))}
-                      exiting={FadeOut.duration(150)}
+                    <Pressable
+                      key={item.code}
+                      onPress={() => { onSelect(item.code); closeModal(); }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
+                      accessibilityLabel={`${item.name}, ${item.code}, ${item.symbol}`}
+                      className="flex-row items-center justify-between p-3.5 rounded-xl mb-2"
+                      style={({ pressed }) => [
+                        isSelected
+                          // borderWidth 1 replaces 1.5 (non-integer)
+                          ? { backgroundColor: `${colors.primary}12`, borderWidth: 1, borderColor: `${colors.primary}30` }
+                          : { backgroundColor: colors.backgroundAlt },
+                        pressed && { opacity: 0.7 },
+                      ]}
                     >
-                      <Pressable
-                        onPress={() => { onSelect(item.code); closeModal(); }}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: isSelected }}
-                        accessibilityLabel={`${item.name}, ${item.code}, ${item.symbol}`}
-                        className="flex-row items-center justify-between p-3.5 rounded-xl mb-2"
-                        style={({ pressed }) => [
-                          isSelected
-                            // borderWidth 1 replaces 1.5 (non-integer)
-                            ? { backgroundColor: `${colors.primary}12`, borderWidth: 1, borderColor: `${colors.primary}30` }
-                            : { backgroundColor: colors.backgroundAlt },
-                          pressed && { opacity: 0.7 },
-                        ]}
-                      >
-                        <View className="flex-row items-center gap-3">
-                          <FlagIcon code={item.flag} size={22} />
+                      <View className="flex-row items-center gap-3">
+                        <FlagIcon code={item.flag} size={22} />
 
-                          <View>
-                            <View className="flex-row items-center gap-2">
-                              {/* font-bold = fontWeights.bold (was font-black, outside token) */}
-                              <ThemedText className="text-sm font-bold">{item.code}</ThemedText>
-                              <View style={{
-                                backgroundColor: `${colors.primary}15`,
-                                borderRadius: borderRadius.md,   // 8px token (was 6, magic)
-                                paddingHorizontal: spacing.xs,   // 4px token (was 6, magic)
-                                paddingVertical: 2,
-                              }}>
-                                {/* text-xs = typography.fontSizes.xs; font-semibold within token scale */}
-                                <ThemedText
-                                  className="text-xs font-semibold"
-                                  style={{ color: colors.primary }}
-                                >
-                                  {item.symbol}
-                                </ThemedText>
-                              </View>
+                        <View>
+                          <View className="flex-row items-center gap-2">
+                            {/* font-bold = fontWeights.bold (was font-black, outside token) */}
+                            <ThemedText className="text-sm font-bold">{item.code}</ThemedText>
+                            <View style={{
+                              backgroundColor: `${colors.primary}15`,
+                              borderRadius: borderRadius.md,   // 8px token (was 6, magic)
+                              paddingHorizontal: spacing.xs,   // 4px token (was 6, magic)
+                              paddingVertical: 2,
+                            }}>
+                              {/* text-xs = typography.fontSizes.xs; font-semibold within token scale */}
+                              <ThemedText
+                                className="text-xs font-semibold"
+                                style={{ color: colors.primary }}
+                              >
+                                {item.symbol}
+                              </ThemedText>
                             </View>
-                            <ThemedText className="text-xs" style={{ color: colors.textMuted }}>
-                              {item.name}
-                            </ThemedText>
                           </View>
+                          <ThemedText className="text-xs" style={{ color: colors.textMuted }}>
+                            {item.name}
+                          </ThemedText>
                         </View>
+                      </View>
 
-                        {isSelected && (
-                          <View style={{
-                            backgroundColor: `${colors.primary}20`,
-                            borderRadius: borderRadius.lg,   // 12px token (was 10, magic)
-                            padding: spacing.xs,             // 4px token ✅
-                          }}>
-                            <Ionicons name="checkmark" color={colors.primary} size={16} />
-                          </View>
-                        )}
-                      </Pressable>
-                    </Animated.View>
+                      {isSelected && (
+                        <View style={{
+                          backgroundColor: `${colors.primary}20`,
+                          borderRadius: borderRadius.lg,   // 12px token (was 10, magic)
+                          padding: spacing.xs,             // 4px token ✅
+                        }}>
+                          <Ionicons name="checkmark" color={colors.primary} size={16} />
+                        </View>
+                      )}
+                    </Pressable>
                   );
                 })
               )}

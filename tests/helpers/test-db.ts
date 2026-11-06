@@ -3,7 +3,9 @@
  *
  * Wraps an in-memory better-sqlite3 database in the subset of the expo-sqlite
  * API that the app uses (prepareSync for Drizzle, plus execAsync / runAsync /
- * getAllAsync / getFirstAsync / withTransactionAsync for raw SQL). The real
+ * getAllAsync / getFirstAsync / prepareAsync / withTransactionAsync /
+ * withExclusiveTransactionAsync for raw SQL; the exclusive variant runs on the
+ * same connection here rather than a new one as on device). The real
  * migrations, Drizzle queries and backup service then run unchanged.
  *
  * Usage (at the top of a test file):
@@ -101,6 +103,32 @@ export function createExpoCompatibleDb(raw: Database.Database): SQLite.SQLiteDat
           return { getAllSync: () => rows, getFirstSync: () => rows[0] ?? null };
         },
         finalizeSync() {},
+      };
+    },
+
+    // ---- Prepared statements (backup restore) ----
+    async prepareAsync(sql: string) {
+      const stmt = prepare(sql);
+      let finalized = false;
+      return {
+        async executeAsync(...args: unknown[]) {
+          if (finalized) throw new Error('Statement already finalized');
+          const params = bind(normalizeParams(args));
+          if (stmt.reader) {
+            const rows = stmt.all(...params);
+            return { changes: 0, lastInsertRowId: 0, getAllAsync: async () => rows, getFirstAsync: async () => rows[0] ?? null };
+          }
+          const r = stmt.run(...params);
+          return {
+            changes: r.changes,
+            lastInsertRowId: Number(r.lastInsertRowid),
+            getAllAsync: async () => [],
+            getFirstAsync: async () => null,
+          };
+        },
+        async finalizeAsync() {
+          finalized = true;
+        },
       };
     },
 

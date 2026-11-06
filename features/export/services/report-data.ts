@@ -1,5 +1,5 @@
 import { loadBudgetsWithSpend } from '@/features/budgets/services/budget-spend';
-import { getExpenseByCategory, getMonthlyTotals, getTransactions, isTransferCategory, type MonthlyTotals } from '@/lib/db/queries';
+import { getExpenseByCategory, getMonthlyTotals, getPeriodTotals, getTransactions, isTransferCategory, type MonthlyTotals } from '@/lib/db/queries';
 import { parseLocalDate, toISODateString } from '@/lib/utils/date';
 
 export interface ReportTransaction {
@@ -91,20 +91,20 @@ export async function buildReportData(opts: {
     const endDate = parseLocalDate(end);
     const anchor = endDate < now ? endDate : now;
     const months = Math.max(1, monthSpan(start, toISODateString(anchor)));
-    const [rows, byCategory, monthly, budgets] = await Promise.all([
-        getTransactions({ startDate: start, endDate: end }),
+    // Totals come from SQL; the rows themselves are only loaded when the
+    // transactions section is included.
+    const [totals, rows, byCategory, monthly, budgets] = await Promise.all([
+        getPeriodTotals(start, end),
+        sections.transactions ? getTransactions({ startDate: start, endDate: end }) : Promise.resolve([]),
         getExpenseByCategory(start, end),
         getMonthlyTotals(months, anchor),
         sections.budgets ? loadBudgetsWithSpend() : Promise.resolve([]),
     ]);
 
-    let income = 0;
-    let expense = 0;
+    const income = round2(totals.income);
+    const expense = round2(totals.expense);
     const transactions: ReportTransaction[] = rows.map(r => {
         const isTransfer = isTransferCategory(r.category?.name);
-        if (!isTransfer) {
-            if (r.type === 'income') income += r.amount; else expense += r.amount;
-        }
         return {
             date: r.date,
             type: r.type as 'income' | 'expense',
@@ -115,8 +115,6 @@ export async function buildReportData(opts: {
             isTransfer,
         };
     });
-    income = round2(income);
-    expense = round2(expense);
 
     const totalSpend = byCategory.reduce((s, c) => s + c.total, 0);
     const categories: ReportCategory[] = byCategory.map(c => ({
@@ -138,11 +136,11 @@ export async function buildReportData(opts: {
             expense,
             net: round2(income - expense),
             savingsRate: income > 0 ? Math.round(((income - expense) / income) * 100) : null,
-            transactionCount: transactions.length,
+            transactionCount: totals.count,
         },
         monthly,
         categories: sections.categories ? categories : [],
-        transactions: sections.transactions ? transactions : [],
+        transactions,
         budgets: budgets.map(b => ({
             category: b.categoryName ?? 'All categories',
             period: b.period,

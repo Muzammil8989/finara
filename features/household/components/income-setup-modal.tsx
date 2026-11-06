@@ -17,6 +17,7 @@ import {
     TextInput,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Period = 'monthly' | 'weekly' | 'yearly';
 const PERIODS: Period[] = ['monthly', 'weekly', 'yearly'];
@@ -30,6 +31,7 @@ interface IncomeSetupModalProps {
 }
 
 export function IncomeSetupModal({ visible, onClose, onSuccess, existingConfig, currencyCode }: IncomeSetupModalProps) {
+    const insets = useSafeAreaInsets();
     const colors = useThemeColors();
     const currencySymbol = POPULAR_CURRENCIES.find(c => c.code === currencyCode)?.symbol ?? '$';
 
@@ -119,7 +121,7 @@ export function IncomeSetupModal({ visible, onClose, onSuccess, existingConfig, 
             maxHeight="90%"
             paddingHorizontal={32}
             paddingTop={48}
-            paddingBottom={64}
+            paddingBottom={insets.bottom + 32}
             keyboardAvoiding
         >
             <SheetHeader title={existingConfig ? 'Edit Household Income' : 'Set Up Household Income'} onClose={handleClose} />

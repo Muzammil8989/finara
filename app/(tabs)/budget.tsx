@@ -1,6 +1,6 @@
 import { EmptyState, Skeleton } from '@/components/common';
 import { BudgetWithSpend, useBudgets } from '@/features/budgets/hooks/use-budgets';
-import { useModals } from '@/providers/modal-context';
+import { useModalActions } from '@/providers/modal-context';
 import { useUser } from '@/features/user/context/user-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { deleteBudget } from '@/lib/db/queries';
@@ -48,7 +48,7 @@ export default function BudgetScreen() {
     const { profile } = useUser();
     const insets = useSafeAreaInsets();
     const colors = useThemeColors();
-    const { openModal, triggerRefresh } = useModals();
+    const { openModal, triggerRefresh } = useModalActions();
     const { budgets, loading, refresh } = useBudgets();
 
     const [deletingBudget, setDeletingBudget] = useState<BudgetWithSpend | null>(null);
@@ -75,15 +75,14 @@ export default function BudgetScreen() {
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             await deleteBudget(deletingBudget.id);
             setDeletingBudget(null);
-            refresh();
-            triggerRefresh();
+            triggerRefresh(['budgets']);
         } catch (e) {
             logger.error('Failed to delete budget', e);
             toast.error('Failed to delete budget');
         } finally {
             setIsDeleting(false);
         }
-    }, [deletingBudget, refresh, triggerRefresh]);
+    }, [deletingBudget, triggerRefresh]);
 
     const [isRefreshing, setIsRefreshing] = useState(false);
     const handleRefresh = useCallback(async () => {
@@ -104,10 +103,24 @@ export default function BudgetScreen() {
 
     return (
         <View className="flex-1 bg-background dark:bg-dark-background">
+            {/* Header stays put; only the content below it scrolls */}
+            <BudgetHeader
+                insets={insets}
+                periodFilter={periodFilter}
+                onPeriodChange={setPeriodFilter}
+                totalSpent={totalSpent}
+                totalBudgeted={totalBudgeted}
+                overallPercent={overallPercent}
+                isMonthlyEquivalent={isMonthlyEquivalent}
+                currency={profile.currency}
+                showSummary={!loading && filteredBudgets.length > 0}
+                count={loading ? undefined : filteredBudgets.length}
+            />
+
             <ScrollView
+                className="flex-1"
                 contentContainerStyle={{ paddingBottom: 120 }}
                 showsVerticalScrollIndicator={false}
-                stickyHeaderIndices={[0]}
                 refreshControl={
                     <RefreshControl
                         refreshing={isRefreshing}
@@ -117,20 +130,6 @@ export default function BudgetScreen() {
                     />
                 }
             >
-                {/* Sticky header */}
-                <BudgetHeader
-                    insets={insets}
-                    periodFilter={periodFilter}
-                    onPeriodChange={setPeriodFilter}
-                    totalSpent={totalSpent}
-                    totalBudgeted={totalBudgeted}
-                    overallPercent={overallPercent}
-                    isMonthlyEquivalent={isMonthlyEquivalent}
-                    currency={profile.currency}
-                    showSummary={!loading && filteredBudgets.length > 0}
-                    count={loading ? undefined : filteredBudgets.length}
-                />
-
                 {/* Content */}
                 {showSkeleton ? (
                     <BudgetListSkeleton />

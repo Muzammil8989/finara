@@ -3,7 +3,7 @@ import { getActiveRecurringExpenses } from '@/lib/db/queries';
 import { categories, recurringExpenses, transactions } from '@/lib/db/schema';
 import { logger } from '@/lib/logger';
 import { addMonthsClamped, parseLocalDate, toISODateString, todayString } from '@/lib/utils/date';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 type Frequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -90,13 +90,19 @@ async function runProcessor(today: string): Promise<ProcessResult> {
         let createdCount = 0;
         const categoryNames: string[] = [];
 
+        // Every category the active items use, in one query instead of one per item.
+        const categoryIds = [...new Set(active.map(r => r.category_id))];
+        const categoryRows = categoryIds.length
+            ? await db
+                .select({ id: categories.id, type: categories.type, name: categories.name })
+                .from(categories)
+                .where(inArray(categories.id, categoryIds))
+            : [];
+        const categoryById = new Map(categoryRows.map(c => [c.id, c]));
+
         for (const recurring of active) {
             try {
-                const [category] = await db
-                    .select({ type: categories.type, name: categories.name })
-                    .from(categories)
-                    .where(eq(categories.id, recurring.category_id))
-                    .limit(1);
+                const category = categoryById.get(recurring.category_id);
                 if (!category) {
                     logger.error(`Category ${recurring.category_id} not found for recurring ${recurring.id}`);
                     continue;

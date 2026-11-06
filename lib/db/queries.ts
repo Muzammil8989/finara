@@ -665,6 +665,32 @@ export async function getBudgetSpend(
 }
 
 /**
+ * Expense spend per category for a period in one grouped query (excluding
+ * transfers, like getBudgetSpend). `total` is the all-category sum, used by
+ * budgets without a category. Lets callers check every budget that shares a
+ * period without one query per budget.
+ */
+export async function getSpendByCategory(
+  startDate: string,
+  endDate: string
+): Promise<{ byCategory: Map<number, number>; total: number }> {
+  const db = getDb();
+  const rows = await db
+    .select({ category_id: transactions.category_id, total: sum(transactions.amount) })
+    .from(transactions)
+    .where(and(eq(transactions.type, 'expense'), between(transactions.date, startDate, endDate), notTransfer()))
+    .groupBy(transactions.category_id);
+  const byCategory = new Map<number, number>();
+  let total = 0;
+  for (const r of rows) {
+    const value = Number(r.total) || 0;
+    byCategory.set(r.category_id, value);
+    total += value;
+  }
+  return { byCategory, total };
+}
+
+/**
  * ACCOUNT QUERIES
  */
 
@@ -684,20 +710,19 @@ export async function getAccountsWithBalance() {
   const db = getDb();
   const accountList = await db.select().from(accounts).orderBy(asc(accounts.name));
 
-  const incomeSums = await db
-    .select({ account_id: transactions.account_id, total: sum(transactions.amount) })
+  // One pass over transactions (covered by idx_transactions_account_type_amount)
+  // instead of one scan per type.
+  const sums = await db
+    .select({
+      account_id: transactions.account_id,
+      income: sql<number>`sum(case when ${transactions.type} = 'income' then ${transactions.amount} end)`,
+      expense: sql<number>`sum(case when ${transactions.type} = 'expense' then ${transactions.amount} end)`,
+    })
     .from(transactions)
-    .where(eq(transactions.type, 'income'))
     .groupBy(transactions.account_id);
 
-  const expenseSums = await db
-    .select({ account_id: transactions.account_id, total: sum(transactions.amount) })
-    .from(transactions)
-    .where(eq(transactions.type, 'expense'))
-    .groupBy(transactions.account_id);
-
-  const incomeMap = new Map(incomeSums.map(r => [r.account_id, Number(r.total) || 0]));
-  const expenseMap = new Map(expenseSums.map(r => [r.account_id, Number(r.total) || 0]));
+  const incomeMap = new Map(sums.map(r => [r.account_id, Number(r.income) || 0]));
+  const expenseMap = new Map(sums.map(r => [r.account_id, Number(r.expense) || 0]));
 
   return accountList.map(account => ({
     ...account,
@@ -900,6 +925,74 @@ export async function getMonthlyTotals(months = 6, now: Date = new Date()): Prom
     else entry.expense = Number(row.total) || 0;
   }
   return result.map(({ key: _key, ...rest }) => rest);
+}
+
+export interface MonthOverMonthTotals {
+  thisMonth: { income: number; expense: number };
+  lastMonth: { income: number; expense: number };
+  /** Every transaction ever, transfers included (the balance fallback). */
+  allIncome: number;
+  allExpense: number;
+}
+
+/**
+ * Income and spending for the current month so far and the whole previous
+ * month (transfers and future-dated entries excluded), plus all-time raw
+ * totals. Grouped in SQL so the home screen doesn't load every transaction.
+ */
+export async function getMonthOverMonthTotals(now: Date = new Date()): Promise<MonthOverMonthTotals> {
+  const db = getDb();
+  const today = toISODateString(now);
+  const thisKey = today.slice(0, 7);
+  const lastKey = toISODateString(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
+  const monthKey = sql<string>`substr(${transactions.date}, 1, 7)`;
+
+  const [rows, allRows] = await Promise.all([
+    db
+      .select({ key: monthKey, type: transactions.type, total: sum(transactions.amount) })
+      .from(transactions)
+      .where(and(between(transactions.date, `${lastKey}-01`, today), notTransfer()))
+      .groupBy(monthKey, transactions.type),
+    db
+      .select({ type: transactions.type, total: sum(transactions.amount) })
+      .from(transactions)
+      .groupBy(transactions.type),
+  ]);
+
+  const result: MonthOverMonthTotals = {
+    thisMonth: { income: 0, expense: 0 },
+    lastMonth: { income: 0, expense: 0 },
+    allIncome: 0,
+    allExpense: 0,
+  };
+  for (const row of rows) {
+    const bucket = row.key === thisKey ? result.thisMonth : row.key === lastKey ? result.lastMonth : null;
+    if (!bucket) continue;
+    if (row.type === 'income') bucket.income = Number(row.total) || 0;
+    else bucket.expense = Number(row.total) || 0;
+  }
+  for (const row of allRows) {
+    if (row.type === 'income') result.allIncome = Number(row.total) || 0;
+    else result.allExpense = Number(row.total) || 0;
+  }
+  return result;
+}
+
+/**
+ * Income/spending (transfers excluded) and the row count (transfers included)
+ * for a date range, inclusive. Same figures as summing getTransactions().
+ */
+export async function getPeriodTotals(startDate: string, endDate: string) {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      income: sql<number>`sum(case when ${transactions.type} = 'income' and ${notTransfer()} then ${transactions.amount} end)`,
+      expense: sql<number>`sum(case when ${transactions.type} = 'expense' and ${notTransfer()} then ${transactions.amount} end)`,
+      count: count(),
+    })
+    .from(transactions)
+    .where(between(transactions.date, startDate, endDate));
+  return { income: Number(row?.income) || 0, expense: Number(row?.expense) || 0, count: Number(row?.count) || 0 };
 }
 
 export interface DailySpend {
@@ -1277,6 +1370,55 @@ export async function clearHouseholdExpensesByRange(startDate: string, endDate: 
   await db
     .delete(householdExpenses)
     .where(and(gte(householdExpenses.date, startDate), lte(householdExpenses.date, endDate)));
+}
+
+/**
+ * Close one elapsed household cycle atomically: total its expenses in SQL,
+ * archive the summary, clear the cycle's expenses and move the config to
+ * `nextStart`. A crash mid-way can no longer archive without clearing (or
+ * clear without archiving).
+ */
+export async function rollOverHouseholdPeriod(cycle: {
+  period: 'monthly' | 'weekly' | 'yearly';
+  start_date: string;
+  end_date: string;
+  income_amount: number;
+  next_start_date: string;
+}) {
+  const db = getDb();
+  const inRange = and(gte(householdExpenses.date, cycle.start_date), lte(householdExpenses.date, cycle.end_date));
+  db.transaction((t) => {
+    const [totals] = t
+      .select({ spent: sum(householdExpenses.amount), count: count() })
+      .from(householdExpenses)
+      .where(inRange)
+      .all();
+    const spent = Number(totals?.spent) || 0;
+    const summary = {
+      period: cycle.period,
+      income_amount: cycle.income_amount,
+      spent_amount: spent,
+      remaining_amount: cycle.income_amount - spent,
+      expense_count: Number(totals?.count) || 0,
+    };
+    const [existing] = t
+      .select({ id: householdPeriodsHistory.id })
+      .from(householdPeriodsHistory)
+      .where(and(eq(householdPeriodsHistory.start_date, cycle.start_date), eq(householdPeriodsHistory.end_date, cycle.end_date)))
+      .limit(1)
+      .all();
+    if (existing) {
+      t.update(householdPeriodsHistory).set(summary).where(eq(householdPeriodsHistory.id, existing.id)).run();
+    } else {
+      t.insert(householdPeriodsHistory)
+        .values({ ...summary, start_date: cycle.start_date, end_date: cycle.end_date, created_at: new Date().toISOString() })
+        .run();
+    }
+    t.delete(householdExpenses).where(inRange).run();
+    t.update(householdConfig)
+      .set({ period_start_date: cycle.next_start_date, updated_at: new Date().toISOString() })
+      .run();
+  });
 }
 
 /** Archive a household period summary into history (idempotent on start+end). */

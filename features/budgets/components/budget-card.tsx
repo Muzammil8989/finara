@@ -20,8 +20,9 @@ interface BudgetCardProps {
  * One budget as a ruled row: name, spent / limit, a thin bar with the alert
  * threshold marked, and a plain-language status. Tap to edit (delete lives in
  * the edit sheet); screen readers also get Edit/Delete actions.
+ * Memoized; callbacks receive the budget so the list can pass stable handlers.
  */
-export function BudgetCard({ budget, currency, onEdit, onDelete }: BudgetCardProps) {
+export const BudgetCard = React.memo(function BudgetCard({ budget, currency, onEdit, onDelete }: BudgetCardProps) {
     const colors = useThemeColors();
     const name = budget.categoryName ?? 'All categories';
     const threshold = budget.alert_threshold ?? 80;
@@ -118,4 +119,4 @@ export function BudgetCard({ budget, currency, onEdit, onDelete }: BudgetCardPro
             </View>
         </Pressable>
     );
-}
+});

@@ -1,7 +1,7 @@
 import { useColorScheme } from 'nativewind';
 import { isDbReady } from '@/lib/db/db-client';
 import { setAccountsCurrency } from '@/lib/db/queries';
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { logger } from '@/lib/logger';
 import { UserProfile, UserService } from '../services/user-service';
 
@@ -80,8 +80,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
+    // Stable value: nearly every screen reads this context.
+    const value = useMemo(() => ({ profile, updateProfile, isLoading }), [profile, updateProfile, isLoading]);
+
     return (
-        <UserContext.Provider value={{ profile, updateProfile, isLoading }}>
+        <UserContext.Provider value={value}>
             {children}
         </UserContext.Provider>
     );

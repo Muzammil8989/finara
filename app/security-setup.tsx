@@ -5,11 +5,13 @@ import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useFactoryReset } from '@/features/auth/hooks/use-factory-reset';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
+import { shadows } from '@/theme/shadows';
 import { SecurityService } from '@/features/auth/services/security-service';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { memo, useEffect, useState } from 'react';
-import { Alert, Pressable, SafeAreaView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
     FadeIn,
     FadeInDown,
@@ -21,16 +23,24 @@ import Animated, {
     withTiming
 } from 'react-native-reanimated';
 
-const NumberButton = memo(({ value, index, onPress }: { value: string, index: number, onPress: (v: string) => void }) => (
+// Keypad geometry: 3 explicit rows so keys never wrap on narrow (<392dp) screens.
+const KEY_MAX_SIZE = 80;
+const KEY_GAP = 16;
+const SCREEN_PADDING_X = 24; // px-6
+
+const NumberButton = memo(({ value, index, size, onPress }: { value: string, index: number, size: number, onPress: (v: string) => void }) => (
     <Animated.View entering={FadeInDown.delay(100 + index * 10).duration(400)}>
         <Pressable
             onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 onPress(value);
             }}
-            className="w-20 h-20 items-center justify-center rounded-full bg-surface dark:bg-dark-surface border border-borderSoft dark:border-dark-borderSoft active:opacity-60 m-2 shadow-sm"
+            className="items-center justify-center rounded-full bg-surface dark:bg-dark-surface border border-borderSoft dark:border-dark-borderSoft active:opacity-60"
+            style={[shadows.sm, { width: size, height: size, borderRadius: size / 2 }]}
+            accessibilityRole="button"
+            accessibilityLabel={value}
         >
-            <Text className="text-3xl font-medium text-textPrimary dark:text-dark-textPrimary">{value}</Text>
+            <Text maxFontSizeMultiplier={1.3} className="text-3xl font-medium text-textPrimary dark:text-dark-textPrimary">{value}</Text>
         </Pressable>
     </Animated.View>
 ));
@@ -68,6 +78,9 @@ export default function SecuritySetupScreen() {
     const [error, setError] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const shakeOffset = useSharedValue(0);
+    const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+    const keySize = Math.floor(Math.min(KEY_MAX_SIZE, (windowWidth - SCREEN_PADDING_X * 2 - KEY_GAP * 2) / 3));
+    const isShortScreen = windowHeight < 700;
 
     const triggerShake = () => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -186,48 +199,61 @@ export default function SecuritySetupScreen() {
     const iconName: IconSymbolName = mode === 'remove' || mode === 'reset' ? 'lock.open.fill' : 'lock.fill';
 
     return (
-        <SafeAreaView className="flex-1 bg-background dark:bg-dark-background">
-            <View className="flex-1 items-center justify-center px-10">
-                <Animated.View
-                    entering={FadeInUp.duration(800).springify().damping(15)}
-                    className="w-16 h-16 rounded-full items-center justify-center mb-6 border border-divider dark:border-dark-divider"
-                >
-                    <IconSymbol name={iconName} color={colors.primary} size={28} />
-                </Animated.View>
-
-                <Animated.View entering={FadeIn.delay(200).duration(800)} style={{ alignItems: 'center', marginBottom: 40 }}>
-                    <ThemedText type="headline" className="text-[26px] leading-8 mb-2 text-center" accessibilityRole="header">{title}</ThemedText>
-                    <ThemedText className="text-center text-[15px] leading-6 text-textSecondary dark:text-dark-textSecondary">{subtitle}</ThemedText>
-                </Animated.View>
-
-                <View style={{ flexDirection: 'row', marginBottom: 60 }}>
-                    {[1, 2, 3, 4].map((i) => (
-                        <PinDot key={i} active={pin.length >= i} error={error} shakeStyle={shakeStyle} themeColors={colors} />
-                    ))}
-                </View>
-
-                <View className="flex-row flex-wrap justify-center max-w-[320px]">
-                    {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num, i) => (
-                        <NumberButton key={num} value={num} index={i} onPress={handlePress} />
-                    ))}
-                    <View className="w-20 h-20 m-2" />
-                    <NumberButton value="0" index={9} onPress={handlePress} />
-                    <Animated.View entering={FadeInDown.delay(300).duration(400)}>
-                        <Pressable
-                            onPress={handleBackspace}
-                            className="w-20 h-20 items-center justify-center m-2 active:opacity-60 bg-surface dark:bg-dark-surface rounded-full border border-borderSoft dark:border-dark-borderSoft"
-                            accessibilityRole="button"
-                            accessibilityLabel="Delete last digit"
-                        >
-                            <IconSymbol name="delete.left.fill" color={colors.textSecondary} size={26} />
-                        </Pressable>
+        <SafeAreaView edges={['top', 'bottom']} className="flex-1 bg-background dark:bg-dark-background">
+            <ScrollView
+                contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+            >
+                <View className="flex-1 items-center justify-center px-6 py-6">
+                    <Animated.View
+                        entering={FadeInUp.duration(800).springify().damping(15)}
+                        className="w-16 h-16 rounded-full items-center justify-center mb-6 border border-divider dark:border-dark-divider"
+                    >
+                        <IconSymbol name={iconName} color={colors.primary} size={28} />
                     </Animated.View>
-                </View>
 
-                <Pressable onPress={() => router.back()} accessibilityRole="button" className="mt-12 min-h-[44px] justify-center px-8 rounded-full border border-borderSoft dark:border-dark-borderSoft active:bg-surface dark:active:bg-dark-surface">
-                    <ThemedText type="label" className="text-textSecondary dark:text-dark-textSecondary">Cancel</ThemedText>
-                </Pressable>
-            </View>
+                    <Animated.View entering={FadeIn.delay(200).duration(800)} style={{ alignItems: 'center', marginBottom: 40 }}>
+                        <ThemedText type="headline" className="text-[26px] leading-8 mb-2 text-center" accessibilityRole="header">{title}</ThemedText>
+                        <ThemedText className="text-center text-[15px] leading-6 text-textSecondary dark:text-dark-textSecondary">{subtitle}</ThemedText>
+                    </Animated.View>
+
+                    <View style={{ flexDirection: 'row', marginBottom: isShortScreen ? 32 : 60 }}>
+                        {[1, 2, 3, 4].map((i) => (
+                            <PinDot key={i} active={pin.length >= i} error={error} shakeStyle={shakeStyle} themeColors={colors} />
+                        ))}
+                    </View>
+
+                    <View style={{ gap: KEY_GAP }}>
+                        {[['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9']].map((row, r) => (
+                            <View key={row[0]} style={{ flexDirection: 'row', gap: KEY_GAP }}>
+                                {row.map((num, c) => (
+                                    <NumberButton key={num} value={num} index={r * 3 + c} size={keySize} onPress={handlePress} />
+                                ))}
+                            </View>
+                        ))}
+                        <View style={{ flexDirection: 'row', gap: KEY_GAP }}>
+                            <View style={{ width: keySize, height: keySize }} />
+                            <NumberButton value="0" index={9} size={keySize} onPress={handlePress} />
+                            <Animated.View entering={FadeInDown.delay(300).duration(400)}>
+                                <Pressable
+                                    onPress={handleBackspace}
+                                    className="items-center justify-center active:opacity-60 bg-surface dark:bg-dark-surface rounded-full border border-borderSoft dark:border-dark-borderSoft"
+                                    style={{ width: keySize, height: keySize, borderRadius: keySize / 2 }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Delete last digit"
+                                >
+                                    <IconSymbol name="delete.left.fill" color={colors.textSecondary} size={26} />
+                                </Pressable>
+                            </Animated.View>
+                        </View>
+                    </View>
+
+                    <Pressable onPress={() => router.back()} accessibilityRole="button" className={`${isShortScreen ? 'mt-8' : 'mt-12'} min-h-[44px] justify-center px-8 rounded-full border border-borderSoft dark:border-dark-borderSoft active:bg-surface dark:active:bg-dark-surface`}>
+                        <ThemedText type="label" className="text-textSecondary dark:text-dark-textSecondary">Cancel</ThemedText>
+                    </Pressable>
+                </View>
+            </ScrollView>
         </SafeAreaView>
     );
 }

@@ -1,17 +1,20 @@
 import { isDbReady } from '@/lib/db/db-client';
 import { loadBudgetsWithSpend, type BudgetWithSpend } from '../services/budget-spend';
-import { useModals } from '@/providers/modal-context';
+import { useRefreshSignal, type RefreshDomain } from '@/providers/modal-context';
 import { logger } from '@/lib/logger';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { InteractionManager } from 'react-native';
 
 export type { BudgetWithSpend };
 
+// Spend comes from transactions; names/icons from categories.
+const REFRESH_DOMAINS: readonly RefreshDomain[] = ['budgets', 'transactions', 'categories'];
+
 export function useBudgets() {
     const [budgets, setBudgets] = useState<BudgetWithSpend[]>([]);
     const [loading, setLoading] = useState(true);
     const mountedRef = useRef(true);
-    const { refreshSignal } = useModals();
+    const refreshSignal = useRefreshSignal(REFRESH_DOMAINS);
 
     useEffect(() => {
         mountedRef.current = true;

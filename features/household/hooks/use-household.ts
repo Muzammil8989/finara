@@ -1,10 +1,8 @@
 import { isDbReady } from '@/lib/db/db-client';
 import {
-    archiveHouseholdPeriod,
-    clearHouseholdExpensesByRange,
     getHouseholdConfig,
     getHouseholdExpenses,
-    resetHouseholdPeriod,
+    rollOverHouseholdPeriod,
     type HouseholdConfig,
     type HouseholdExpenseWithCategory,
 } from '@/lib/db/queries';
@@ -121,27 +119,21 @@ export function useHousehold() {
             }
 
             // Roll forward any elapsed cycles: archive each one and advance period_start_date.
+            // Each cycle (total in SQL, archive, clear, advance) is one DB transaction.
             // Bounded loop so an unlucky clock skew can never spin forever.
             const todayISO = toISO(new Date());
             for (let i = 0; i < 240; i++) {
                 const range = computePeriodRange(cfg);
                 if (range.end >= todayISO) break;
 
-                const pastExps = await getHouseholdExpenses(range.start, range.end);
-                const pastSpent = pastExps.reduce((acc, e) => acc + e.amount, 0);
-                await archiveHouseholdPeriod({
+                const nextStart = advancePeriodStart(cfg.period_start_date, cfg.period, cfg.anchor_day);
+                await rollOverHouseholdPeriod({
                     period: cfg.period,
                     start_date: range.start,
                     end_date: range.end,
                     income_amount: cfg.income_amount,
-                    spent_amount: pastSpent,
-                    remaining_amount: cfg.income_amount - pastSpent,
-                    expense_count: pastExps.length,
+                    next_start_date: nextStart,
                 });
-                await clearHouseholdExpensesByRange(range.start, range.end);
-
-                const nextStart = advancePeriodStart(cfg.period_start_date, cfg.period, cfg.anchor_day);
-                await resetHouseholdPeriod(nextStart);
                 cfg = { ...cfg, period_start_date: nextStart };
             }
 

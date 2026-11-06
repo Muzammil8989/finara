@@ -14,16 +14,20 @@ import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
+    FlatList,
+    ListRenderItem,
     Modal,
     Pressable,
-    ScrollView,
     View,
 } from 'react-native';
 import Animated, { Easing, FadeInDown, FadeInUp, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MAX_CONTENT_WIDTH } from '@/hooks/use-content-width';
+
+const keyExtractor = (item: HouseholdExpenseWithCategory) => String(item.id);
 
 function DeleteConfirmSheet({
     expense,
@@ -46,6 +50,9 @@ function DeleteConfirmSheet({
                     entering={FadeInUp.duration(300).easing(Easing.out(Easing.cubic))}
                     exiting={FadeOutDown.duration(200).easing(Easing.in(Easing.cubic))}
                     style={{
+                        width: '100%',
+                        maxWidth: MAX_CONTENT_WIDTH,
+                        alignSelf: 'center',
                         backgroundColor: colors.surface,
                         borderTopLeftRadius: 24,
                         borderTopRightRadius: 24,
@@ -123,10 +130,21 @@ export default function HouseholdScreen() {
         setAddExpenseVisible(true);
     };
 
-    const openEditExpense = (item: HouseholdExpenseWithCategory) => {
+    const openEditExpense = useCallback((item: HouseholdExpenseWithCategory) => {
         setEditingExpense(item);
         setAddExpenseVisible(true);
-    };
+    }, []);
+
+    const renderExpense = useCallback<ListRenderItem<HouseholdExpenseWithCategory>>(({ item }) => (
+        <View className="px-5">
+            <ExpenseItem
+                item={item}
+                currencyCode={currencyCode}
+                onEdit={openEditExpense}
+                onDelete={setDeletingExpense}
+            />
+        </View>
+    ), [currencyCode, openEditExpense]);
 
     const confirmDelete = async () => {
         if (!deletingExpense) return;
@@ -147,12 +165,8 @@ export default function HouseholdScreen() {
     return (
         <View className="flex-1 bg-background dark:bg-dark-background">
 
-            <ScrollView
-                className="flex-1"
-                style={{ paddingTop: insets.top }}
-                contentContainerStyle={{ paddingBottom: 120 }}
-                showsVerticalScrollIndicator={false}
-            >
+            {/* Header stays put; only the content below it scrolls */}
+            <View style={{ paddingTop: insets.top }}>
                 <ScreenHeader
                     title="Household Budget"
                     subtitle="Track home expenses separately"
@@ -177,25 +191,22 @@ export default function HouseholdScreen() {
                         </View>
                     }
                 />
-
-                <View className="px-5">
-                    {loading ? (
-                        <View className="py-24 items-center">
-                            <ActivityIndicator size="large" color={colors.primary} />
-                        </View>
-                    ) : !config ? (
-                        <EmptyState
-                            icon="home-outline"
-                            title="Set Up Household Budget"
-                            subtitle={`Track your home expenses separately.\nSet one income and log all household expenses against it.`}
-                            actionLabel="Get Started"
-                            onAction={() => setIncomeModalVisible(true)}
-                            iconColor={colors.primary}
-                        />
-                    ) : (
+            </View>
+            {/* Single scroller: summary cards are the list header, expenses are virtualized rows */}
+            <FlatList
+                className="flex-1"
+                data={loading || !config ? [] : expenses}
+                keyExtractor={keyExtractor}
+                renderItem={renderExpense}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
+                showsVerticalScrollIndicator={false}
+                ListHeaderComponent={
+                    loading || !config ? null : (
                         /* ── Main Content ── */
-                        <Animated.View entering={FadeInDown.duration(350).easing(Easing.out(Easing.cubic))}>
-
+                        <Animated.View
+                            style={{ paddingHorizontal: 20 }}
+                            entering={FadeInDown.duration(350).easing(Easing.out(Easing.cubic))}
+                        >
                             {/* Income Card */}
                             <IncomeCard
                                 config={config}
@@ -247,29 +258,35 @@ export default function HouseholdScreen() {
                                     {expenses.length} {expenses.length === 1 ? 'item' : 'items'}
                                 </ThemedText>
                             </View>
-
-                            {expenses.length === 0 ? (
-                                <EmptyState
-                                    icon="receipt-outline"
-                                    title="No Expenses Yet"
-                                    subtitle="Tap + to log your first home expense."
-                                    compact
-                                />
-                            ) : (
-                                expenses.map(item => (
-                                    <ExpenseItem
-                                        key={item.id}
-                                        item={item}
-                                        currencyCode={currencyCode}
-                                        onEdit={openEditExpense}
-                                        onDelete={setDeletingExpense}
-                                    />
-                                ))
-                            )}
                         </Animated.View>
-                    )}
-                </View>
-            </ScrollView>
+                    )
+                }
+                ListEmptyComponent={
+                    <View className="px-5">
+                        {loading ? (
+                            <View className="py-24 items-center">
+                                <ActivityIndicator size="large" color={colors.primary} />
+                            </View>
+                        ) : !config ? (
+                            <EmptyState
+                                icon="home-outline"
+                                title="Set Up Household Budget"
+                                subtitle={`Track your home expenses separately.\nSet one income and log all household expenses against it.`}
+                                actionLabel="Get Started"
+                                onAction={() => setIncomeModalVisible(true)}
+                                iconColor={colors.primary}
+                            />
+                        ) : (
+                            <EmptyState
+                                icon="receipt-outline"
+                                title="No Expenses Yet"
+                                subtitle="Tap + to log your first home expense."
+                                compact
+                            />
+                        )}
+                    </View>
+                }
+            />
 
             {/* FAB — shown once budget is set up */}
             {config && (

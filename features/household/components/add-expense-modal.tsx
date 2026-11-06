@@ -19,6 +19,7 @@ import {
     TextInput,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface AddExpenseModalProps {
     visible: boolean;
@@ -34,6 +35,7 @@ interface AddExpenseModalProps {
 }
 
 export function AddExpenseModal({ visible, onClose, onSuccess, editingExpense, currencyCode, periodStart }: AddExpenseModalProps) {
+    const insets = useSafeAreaInsets();
     const colors = useThemeColors();
     const { categories, refresh: refreshCategories } = useCategories('expense');
     const currencySymbol = POPULAR_CURRENCIES.find(c => c.code === currencyCode)?.symbol ?? '$';
@@ -142,7 +144,7 @@ export function AddExpenseModal({ visible, onClose, onSuccess, editingExpense, c
             maxHeight="92%"
             paddingHorizontal={32}
             paddingTop={48}
-            paddingBottom={64}
+            paddingBottom={insets.bottom + 32}
             gradientColors={['rgba(239,68,68,0.14)', 'rgba(239,68,68,0.04)', 'transparent']}
             keyboardAvoiding
         >

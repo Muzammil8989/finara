@@ -84,7 +84,6 @@ export default function SavingsScreen() {
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             await deleteSavingsGoal(deletingGoal.id);
             setDeletingGoal(null);
-            refresh();
             triggerRefresh();
         } catch (e) {
             logger.error('Failed to delete goal', e);
@@ -92,17 +91,31 @@ export default function SavingsScreen() {
         } finally {
             setIsDeletingGoal(false);
         }
-    }, [deletingGoal, refresh, triggerRefresh]);
+    }, [deletingGoal, triggerRefresh]);
 
     const showSkeleton = loading && goals.length === 0;
     const refreshing = loading && goals.length > 0;
 
     return (
         <View className="flex-1 bg-background dark:bg-dark-background">
+            {/* Header stays put; only the content below it scrolls */}
+            <SavingsHeader
+                insets={insets}
+                showSummary={!loading && goals.length > 0}
+                totalSaved={totalSaved}
+                totalTarget={totalTarget}
+                overallPct={overallPct}
+                completedCount={completedCount}
+                goalCount={goals.length}
+                currency={profile.currency}
+                activeFilter={filter}
+                onFilterChange={setFilter}
+            />
+
             <ScrollView
+                className="flex-1"
                 contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
                 showsVerticalScrollIndicator={false}
-                stickyHeaderIndices={[0]}
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
@@ -112,20 +125,6 @@ export default function SavingsScreen() {
                     />
                 }
             >
-                {/* Sticky header */}
-                <SavingsHeader
-                    insets={insets}
-                    showSummary={!loading && goals.length > 0}
-                    totalSaved={totalSaved}
-                    totalTarget={totalTarget}
-                    overallPct={overallPct}
-                    completedCount={completedCount}
-                    goalCount={goals.length}
-                    currency={profile.currency}
-                    activeFilter={filter}
-                    onFilterChange={setFilter}
-                />
-
                 {/* Content */}
                 {showSkeleton ? (
                     <GoalListSkeleton />
@@ -154,9 +153,9 @@ export default function SavingsScreen() {
                                 key={goal.id}
                                 goal={goal}
                                 currency={profile.currency}
-                                onEdit={() => setEditingGoal(goal)}
-                                onDelete={() => setDeletingGoal(goal)}
-                                onContribute={() => setContributingGoal(goal)}
+                                onEdit={setEditingGoal}
+                                onDelete={setDeletingGoal}
+                                onContribute={setContributingGoal}
                             />
                         ))}
                     </View>
@@ -167,7 +166,7 @@ export default function SavingsScreen() {
                 <GoalFormSheet
                     goal={editingGoal}
                     onClose={() => { closeModal(); setEditingGoal(null); }}
-                    onSuccess={() => { closeModal(); setEditingGoal(null); triggerRefresh(); refresh(); }}
+                    onSuccess={() => { closeModal(); setEditingGoal(null); triggerRefresh(); }}
                     onDelete={editingGoal ? () => { const g = editingGoal; closeModal(); setEditingGoal(null); setDeletingGoal(g); } : undefined}
                 />
             )}
@@ -186,7 +185,7 @@ export default function SavingsScreen() {
                     goal={contributingGoal}
                     currency={profile.currency}
                     onClose={() => setContributingGoal(null)}
-                    onSuccess={() => { setContributingGoal(null); refresh(); triggerRefresh(); }}
+                    onSuccess={() => { setContributingGoal(null); triggerRefresh(); }}
                 />
             )}
         </View>

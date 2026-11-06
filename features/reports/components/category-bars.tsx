@@ -18,7 +18,7 @@ interface CategoryBarsProps {
  * than a donut once there are more than a handful of categories. Every bar
  * carries its name, amount and share as text, so colour is never the only cue.
  */
-export function CategoryBars({ categoryData, currency, maxRows = 6 }: CategoryBarsProps) {
+function CategoryBarsInner({ categoryData, currency, maxRows = 6 }: CategoryBarsProps) {
     const t = useChartTheme();
     const { slices, total } = useMemo(() => buildDonutSlices(categoryData, maxRows), [categoryData, maxRows]);
     const top = slices[0]?.value ?? 0;
@@ -60,3 +60,6 @@ export function CategoryBars({ categoryData, currency, maxRows = 6 }: CategoryBa
         </View>
     );
 }
+
+// Memoized: the Insights screen re-renders while loading and on period changes.
+export const CategoryBars = React.memo(CategoryBarsInner);

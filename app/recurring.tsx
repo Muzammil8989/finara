@@ -1,64 +1,32 @@
 import { AppButton, EmptyState, ScreenHeader, SegmentedControl, ThemedText } from '@/components/common';
-import { CategoryChips } from '@/features/transactions/components/category-chips';
 import { useAccounts } from '@/features/accounts/hooks/use-accounts';
 import { useCategories } from '@/features/categories/hooks/use-categories';
+import { RecurringFormModal } from '@/features/recurring/components/recurring-form-modal';
+import { RecurringItem, RecurringRow } from '@/features/recurring/components/recurring-row';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useUser } from '@/features/user/context/user-context';
 import {
-    createRecurringExpense,
     deleteRecurringExpense,
     getRecurringExpensesWithDetails,
     updateRecurringExpense,
 } from '@/lib/db/queries';
-import { formatWithCommas, numberToWords, parseAmount } from '@/lib/utils/currency';
-import { todayString } from '@/lib/utils/date';
-import { processRecurringTransactions, resumeRecurring } from '@/features/recurring/services/recurring-processor';
+import { resumeRecurring } from '@/features/recurring/services/recurring-processor';
 import { logger } from '@/lib/logger';
 import { toast } from '@/lib/toast';
 import { UserService } from '@/features/user/services/user-service';
-import { useModals } from '@/providers/modal-context';
-import { IoniconsName } from '@/types';
+import { useModalActions } from '@/providers/modal-context';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     InteractionManager,
-    KeyboardAvoidingView,
     Modal,
-    Platform,
     Pressable,
     ScrollView,
-    TextInput,
     View,
 } from 'react-native';
-import Animated, { Easing, FadeInDown, FadeInUp, FadeOutDown } from 'react-native-reanimated';
+import Animated, { Easing, FadeInUp, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-type RecurringFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
-
-interface RecurringItem {
-    id: number;
-    amount: number;
-    frequency: RecurringFrequency;
-    start_date: string;
-    end_date: string | null;
-    notes: string | null;
-    is_active: number | null;
-    category_id: number;
-    account_id: number;
-    categoryName: string | null;
-    categoryIcon: string | null;
-    categoryColor: string | null;
-    categoryType: string | null;
-    accountName: string | null;
-}
-
-const FREQUENCY_LABELS: Record<string, string> = {
-    daily: 'Daily',
-    weekly: 'Weekly',
-    monthly: 'Monthly',
-    yearly: 'Yearly',
-};
 
 function DeleteConfirmSheet({
     item,
@@ -178,28 +146,17 @@ export default function RecurringScreen() {
     const { profile } = useUser();
     const { categories } = useCategories();
     const { accounts } = useAccounts();
-    const { triggerRefresh } = useModals();
+    const { triggerRefresh } = useModalActions();
 
     const [items, setItems] = useState<RecurringItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'expense' | 'income'>('expense');
 
-    // Add modal state
+    // Add sheet stays mounted (so it can slide out); bumping the key on each
+    // open remounts it with fresh form state.
     const [addModalVisible, setAddModalVisible] = useState(false);
-    const [addAmount, setAddAmount] = useState('');
-    const [addFrequency, setAddFrequency] = useState<RecurringFrequency>('monthly');
-    const [addCategoryId, setAddCategoryId] = useState<number | null>(null);
-    const [addAccountId, setAddAccountId] = useState<number | null>(null);
-    const [addNotes, setAddNotes] = useState('');
-
-    // Edit modal state
+    const [addFormKey, setAddFormKey] = useState(0);
     const [editItem, setEditItem] = useState<RecurringItem | null>(null);
-    const [editAmount, setEditAmount] = useState('');
-    const [editFrequency, setEditFrequency] = useState<RecurringFrequency>('monthly');
-    const [editCategoryId, setEditCategoryId] = useState<number | null>(null);
-    const [editAccountId, setEditAccountId] = useState<number | null>(null);
-    const [editNotes, setEditNotes] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
     const [deletingItem, setDeletingItem] = useState<RecurringItem | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [togglingItem, setTogglingItem] = useState<RecurringItem | null>(null);
@@ -237,104 +194,34 @@ export default function RecurringScreen() {
         return () => task.cancel();
     }, [fetchItems]);
 
-    const openAddModal = () => {
-        setAddAmount('');
-        setAddFrequency('monthly');
-        setAddCategoryId(null);
-        setAddAccountId(accounts?.[0]?.id ?? null);
-        setAddNotes('');
+    const openAddModal = useCallback(() => {
+        setAddFormKey(k => k + 1);
         setAddModalVisible(true);
-    };
+    }, []);
 
-    const handleAdd = async () => {
-        const parsedAmount = parseAmount(addAmount);
-        if (!addAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
-            toast.error('Please enter a valid amount');
-            return;
-        }
-        if (!addCategoryId) {
-            toast.error('Please select a category');
-            return;
-        }
-        if (!addAccountId) {
-            toast.error('Please select a payment method');
-            return;
-        }
+    const closeAddModal = useCallback(() => setAddModalVisible(false), []);
 
-        setIsSubmitting(true);
-        try {
-            await createRecurringExpense({
-                amount: parsedAmount,
-                frequency: addFrequency,
-                category_id: addCategoryId,
-                account_id: addAccountId,
-                start_date: todayString(),
-                notes: addNotes.trim() || null,
-                is_active: 1,
-            });
-            // Book today's occurrence now rather than on next app launch.
-            await processRecurringTransactions();
-            toast.success('Recurring item added');
-            setAddModalVisible(false);
-            fetchItems();
-            triggerRefresh();
-        } catch (error) {
-            logger.error('Error creating recurring item:', error);
-            toast.error('Failed to add');
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
+    const handleAdded = useCallback(() => {
+        setAddModalVisible(false);
+        fetchItems();
+        triggerRefresh();
+    }, [fetchItems, triggerRefresh]);
 
-    const openEditModal = (item: RecurringItem) => {
+    const openEditModal = useCallback((item: RecurringItem) => {
         setEditItem(item);
-        setEditAmount(item.amount.toString());
-        setEditFrequency(item.frequency);
-        setEditCategoryId(item.category_id);
-        setEditAccountId(item.account_id);
-        setEditNotes(item.notes || '');
-    };
+    }, []);
 
-    const handleSave = async () => {
-        if (!editItem) return;
-        const parsedAmount = parseAmount(editAmount);
-        if (!editAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
-            toast.error('Please enter a valid amount');
-            return;
-        }
-        if (!editCategoryId) {
-            toast.error('Please select a category');
-            return;
-        }
-        if (!editAccountId) {
-            toast.error('Please select a payment method');
-            return;
-        }
+    const closeEditModal = useCallback(() => setEditItem(null), []);
 
-        setIsSubmitting(true);
-        try {
-            await updateRecurringExpense(editItem.id, {
-                amount: parsedAmount,
-                frequency: editFrequency,
-                category_id: editCategoryId,
-                account_id: editAccountId,
-                notes: editNotes.trim() || null,
-            });
-            toast.success('Recurring item updated');
-            setEditItem(null);
-            fetchItems();
-            triggerRefresh();
-        } catch (error) {
-            logger.error('Error updating recurring item:', error);
-            toast.error('Failed to update');
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
+    const handleEdited = useCallback(() => {
+        setEditItem(null);
+        fetchItems();
+        triggerRefresh();
+    }, [fetchItems, triggerRefresh]);
 
-    const handleToggleActive = (item: RecurringItem) => {
+    const handleToggleActive = useCallback((item: RecurringItem) => {
         setTogglingItem(item);
-    };
+    }, []);
 
     const handleConfirmToggle = async () => {
         if (!togglingItem) return;
@@ -355,9 +242,9 @@ export default function RecurringScreen() {
         }
     };
 
-    const handleDelete = (item: RecurringItem) => {
+    const handleDelete = useCallback((item: RecurringItem) => {
         setDeletingItem(item);
-    };
+    }, []);
 
     const handleConfirmDelete = async () => {
         if (!deletingItem) return;
@@ -375,438 +262,12 @@ export default function RecurringScreen() {
         }
     };
 
-    const filteredItems = items.filter(i => i.categoryType === activeTab);
-
-    const renderEditModal = () => {
-        if (!editItem) return null;
-
-        const isIncome = editItem.categoryType === 'income';
-        const filteredCategories = (categories || []).filter(c => c?.type === editItem.categoryType);
-
-        return (
-            <Modal visible={!!editItem} animationType="slide" transparent onRequestClose={() => setEditItem(null)}>
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}
-                >
-                    <Animated.View
-                        entering={FadeInDown.duration(350)}
-                        style={{
-                            backgroundColor: colors.surface,
-                            borderTopLeftRadius: 24,
-                            borderTopRightRadius: 24,
-                            paddingHorizontal: 24,
-                            paddingTop: 16,
-                            paddingBottom: insets.bottom + 40,
-                            maxHeight: '90%',
-                            overflow: 'hidden',
-                        }}
-                    >
-                        <View className="flex-row justify-between items-center mb-8">
-                            <View className="flex-row items-center gap-3">
-                                <Ionicons name="repeat" size={22} color={isIncome ? colors.success : colors.error} />
-                                <ThemedText className="text-xl font-bold">Edit Recurring</ThemedText>
-                            </View>
-                            <Pressable onPress={() => setEditItem(null)} className="p-2">
-                                <Ionicons name="close" size={24} color={colors.expense} />
-                            </Pressable>
-                        </View>
-
-                        <ScrollView
-                            showsVerticalScrollIndicator={false}
-                            keyboardShouldPersistTaps="handled"
-                            contentContainerStyle={{ paddingBottom: 24 }}
-                        >
-                            {/* Amount */}
-                            <View className="mb-6">
-                                <ThemedText type="kicker" className="mb-2" style={{ color: colors.textMuted }}>Amount</ThemedText>
-                                <View className="flex-row items-center rounded-xl px-6 py-4" style={{ backgroundColor: colors.backgroundAlt }}>
-                                    <ThemedText className="text-lg font-bold mr-2" style={{ color: colors.textMuted }}>{currencySymbol}</ThemedText>
-                                    <TextInput
-                                        value={editAmount}
-                                        onChangeText={setEditAmount}
-                                        keyboardType="decimal-pad"
-                                        placeholder="0.00"
-                                        placeholderTextColor={colors.textMuted}
-                                        className="flex-1 text-lg font-bold"
-                                        style={{ color: colors.textPrimary, fontFamily: 'SpaceGrotesk_700Bold' }}
-                                    />
-                                </View>
-                                {!!editAmount && !isNaN(parseAmount(editAmount)) && parseAmount(editAmount) > 0 && (
-                                    <View className="items-center mt-2 gap-0.5">
-                                        <ThemedText className="text-sm font-bold" style={{ color: colors.primary }}>
-                                            {formatWithCommas(editAmount)}
-                                        </ThemedText>
-                                        <ThemedText className="text-xs font-medium" style={{ color: colors.textMuted }}>
-                                            {numberToWords(parseAmount(editAmount))}
-                                        </ThemedText>
-                                    </View>
-                                )}
-                            </View>
-
-                            {/* Frequency */}
-                            <View className="mb-6">
-                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Frequency</ThemedText>
-                                <View className="flex-row gap-2">
-                                    {(['daily', 'weekly', 'monthly', 'yearly'] as const).map(freq => (
-                                        <Pressable
-                                            key={freq}
-                                            onPress={() => setEditFrequency(freq)}
-                                            className="flex-1 py-3 rounded-xl items-center"
-                                            style={{
-                                                backgroundColor: editFrequency === freq ? colors.primary : colors.backgroundAlt,
-                                            }}
-                                        >
-                                            <ThemedText
-                                                className="text-xs font-bold"
-                                                style={{ color: editFrequency === freq ? colors.white : colors.textSecondary }}
-                                            >
-                                                {FREQUENCY_LABELS[freq]}
-                                            </ThemedText>
-                                        </Pressable>
-                                    ))}
-                                </View>
-                            </View>
-
-                            {/* Category */}
-                            <View className="mb-6">
-                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Category</ThemedText>
-                                <CategoryChips
-                                    categories={filteredCategories}
-                                    selectedCategoryId={editCategoryId}
-                                    onSelect={setEditCategoryId}
-                                />
-                            </View>
-
-                            {/* Account */}
-                            <View className="mb-6">
-                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Payment Method</ThemedText>
-                                <View className="flex-row flex-wrap gap-2">
-                                    {(accounts || []).map(acc => {
-                                        if (!acc?.id) return null;
-                                        const isSelected = editAccountId === acc.id;
-                                        return (
-                                            <Pressable
-                                                key={acc.id}
-                                                onPress={() => setEditAccountId(acc.id)}
-                                                className="px-4 py-3 rounded-xl flex-row items-center gap-2"
-                                                style={{
-                                                    backgroundColor: isSelected ? colors.primary : colors.backgroundAlt,
-                                                    borderWidth: isSelected ? 0 : 1,
-                                                    borderColor: isSelected ? 'transparent' : colors.borderSoft,
-                                                }}
-                                            >
-                                                <Ionicons name={(acc.icon || 'wallet') as IoniconsName} size={16} color={isSelected ? colors.white : (acc.color || colors.textMuted)} />
-                                                <ThemedText className="text-sm font-bold" style={{ color: isSelected ? colors.white : colors.textSecondary }}>
-                                                    {acc.name}
-                                                </ThemedText>
-                                            </Pressable>
-                                        );
-                                    })}
-                                </View>
-                            </View>
-
-                            {/* Notes */}
-                            <View className="mb-8">
-                                <ThemedText type="kicker" className="mb-2" style={{ color: colors.textMuted }}>Note</ThemedText>
-                                <TextInput
-                                    value={editNotes}
-                                    onChangeText={setEditNotes}
-                                    placeholder="Description..."
-                                    placeholderTextColor={colors.textMuted}
-                                    multiline
-                                    numberOfLines={2}
-                                    className="w-full rounded-xl py-3 px-4 text-sm font-bold"
-                                    style={{ color: colors.textPrimary, backgroundColor: colors.backgroundAlt, fontFamily: 'PlusJakartaSans_700Bold' }}
-                                />
-                            </View>
-
-                            <AppButton
-                                label="Update Recurring"
-                                onPress={handleSave}
-                                loading={isSubmitting}
-                                disabled={isSubmitting}
-                            />
-                        </ScrollView>
-                    </Animated.View>
-                </KeyboardAvoidingView>
-            </Modal>
-        );
-    };
-
-    const renderAddModal = () => {
-        const addCategories = (categories || []).filter(c => c?.type === activeTab);
-
-        return (
-            <Modal visible={addModalVisible} animationType="slide" transparent onRequestClose={() => setAddModalVisible(false)}>
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}
-                >
-                    <Animated.View
-                        entering={FadeInDown.duration(350)}
-                        style={{
-                            backgroundColor: colors.surface,
-                            borderTopLeftRadius: 24,
-                            borderTopRightRadius: 24,
-                            paddingHorizontal: 24,
-                            paddingTop: 16,
-                            paddingBottom: insets.bottom + 40,
-                            maxHeight: '90%',
-                            overflow: 'hidden',
-                        }}
-                    >
-                        <View className="flex-row justify-between items-center mb-8">
-                            <View className="flex-row items-center gap-3">
-                                <Ionicons name="repeat" size={22} color={activeTab === 'income' ? colors.success : colors.error} />
-                                <ThemedText className="text-xl font-bold">
-                                    New {activeTab === 'income' ? 'Income' : 'Expense'}
-                                </ThemedText>
-                            </View>
-                            <Pressable onPress={() => setAddModalVisible(false)} className="p-2">
-                                <Ionicons name="close" size={24} color={colors.expense} />
-                            </Pressable>
-                        </View>
-
-                        <ScrollView
-                            showsVerticalScrollIndicator={false}
-                            keyboardShouldPersistTaps="handled"
-                            contentContainerStyle={{ paddingBottom: 24 }}
-                        >
-                            {/* Amount */}
-                            <View className="mb-6">
-                                <ThemedText type="kicker" className="mb-2" style={{ color: colors.textMuted }}>Amount</ThemedText>
-                                <View className="flex-row items-center rounded-xl px-6 py-4" style={{ backgroundColor: colors.backgroundAlt }}>
-                                    <ThemedText className="text-lg font-bold mr-2" style={{ color: colors.textMuted }}>{currencySymbol}</ThemedText>
-                                    <TextInput
-                                        value={addAmount}
-                                        onChangeText={setAddAmount}
-                                        keyboardType="decimal-pad"
-                                        placeholder="0.00"
-                                        placeholderTextColor={colors.textMuted}
-                                        className="flex-1 text-lg font-bold"
-                                        style={{ color: colors.textPrimary, fontFamily: 'SpaceGrotesk_700Bold' }}
-                                    />
-                                </View>
-                                {!!addAmount && !isNaN(parseAmount(addAmount)) && parseAmount(addAmount) > 0 && (
-                                    <View className="items-center mt-2 gap-0.5">
-                                        <ThemedText className="text-sm font-bold" style={{ color: colors.primary }}>
-                                            {formatWithCommas(addAmount)}
-                                        </ThemedText>
-                                        <ThemedText className="text-xs font-medium" style={{ color: colors.textMuted }}>
-                                            {numberToWords(parseAmount(addAmount))}
-                                        </ThemedText>
-                                    </View>
-                                )}
-                            </View>
-
-                            {/* Frequency */}
-                            <View className="mb-6">
-                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Frequency</ThemedText>
-                                <View className="flex-row gap-2">
-                                    {(['daily', 'weekly', 'monthly', 'yearly'] as const).map(freq => (
-                                        <Pressable
-                                            key={freq}
-                                            onPress={() => setAddFrequency(freq)}
-                                            className="flex-1 py-3 rounded-xl items-center"
-                                            style={{
-                                                backgroundColor: addFrequency === freq ? colors.primary : colors.backgroundAlt,
-                                            }}
-                                        >
-                                            <ThemedText
-                                                className="text-xs font-bold"
-                                                style={{ color: addFrequency === freq ? colors.white : colors.textSecondary }}
-                                            >
-                                                {FREQUENCY_LABELS[freq]}
-                                            </ThemedText>
-                                        </Pressable>
-                                    ))}
-                                </View>
-                            </View>
-
-                            {/* Category */}
-                            <View className="mb-6">
-                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Category</ThemedText>
-                                <CategoryChips
-                                    categories={addCategories}
-                                    selectedCategoryId={addCategoryId}
-                                    onSelect={setAddCategoryId}
-                                />
-                            </View>
-
-                            {/* Account */}
-                            <View className="mb-6">
-                                <ThemedText type="kicker" className="mb-3" style={{ color: colors.textMuted }}>Payment Method</ThemedText>
-                                <View className="flex-row flex-wrap gap-2">
-                                    {(accounts || []).map(acc => {
-                                        if (!acc?.id) return null;
-                                        const isSelected = addAccountId === acc.id;
-                                        return (
-                                            <Pressable
-                                                key={acc.id}
-                                                onPress={() => setAddAccountId(acc.id)}
-                                                className="px-4 py-3 rounded-xl flex-row items-center gap-2"
-                                                style={{
-                                                    backgroundColor: isSelected ? colors.primary : colors.backgroundAlt,
-                                                    borderWidth: isSelected ? 0 : 1,
-                                                    borderColor: isSelected ? 'transparent' : colors.borderSoft,
-                                                }}
-                                            >
-                                                <Ionicons name={(acc.icon || 'wallet') as IoniconsName} size={16} color={isSelected ? colors.white : (acc.color || colors.textMuted)} />
-                                                <ThemedText className="text-sm font-bold" style={{ color: isSelected ? colors.white : colors.textSecondary }}>
-                                                    {acc.name}
-                                                </ThemedText>
-                                            </Pressable>
-                                        );
-                                    })}
-                                </View>
-                            </View>
-
-                            {/* Notes */}
-                            <View className="mb-8">
-                                <ThemedText type="kicker" className="mb-2" style={{ color: colors.textMuted }}>Note</ThemedText>
-                                <TextInput
-                                    value={addNotes}
-                                    onChangeText={setAddNotes}
-                                    placeholder="Description..."
-                                    placeholderTextColor={colors.textMuted}
-                                    multiline
-                                    numberOfLines={2}
-                                    className="w-full rounded-xl py-3 px-4 text-sm font-bold"
-                                    style={{ color: colors.textPrimary, backgroundColor: colors.backgroundAlt, fontFamily: 'PlusJakartaSans_700Bold' }}
-                                />
-                            </View>
-
-                            <AppButton
-                                label={`Add Recurring ${activeTab === 'income' ? 'Income' : 'Expense'}`}
-                                onPress={handleAdd}
-                                loading={isSubmitting}
-                                disabled={isSubmitting}
-                                color={activeTab === 'income' ? colors.success : colors.error}
-                            />
-                        </ScrollView>
-                    </Animated.View>
-                </KeyboardAvoidingView>
-            </Modal>
-        );
-    };
-
-    const renderItem = (item: RecurringItem, index: number) => {
-        const isIncome = item.categoryType === 'income';
-        const isPaused = item.is_active !== 1;
-        const icon = item.categoryIcon || (isIncome ? 'wallet' : 'fast-food');
-        const color = item.categoryColor || colors.primary;
-
-        return (
-            <View
-                key={item.id}
-                style={{
-                    opacity: isPaused ? 0.55 : 1,
-                    marginBottom: 16,
-                }}
-            >
-                <Animated.View
-                    entering={FadeInDown.delay(index * 50).springify()}
-                    style={{
-                        backgroundColor: colors.backgroundAlt,
-                        borderRadius: 24,
-                        padding: 20,
-                    }}
-                >
-                <View className="flex-row items-center mb-4">
-                    <View
-                        className="mr-4 items-center justify-center"
-                        style={{ width: 36, height: 36 }}
-                    >
-                        <Ionicons name={icon as IoniconsName} size={24} color={color} />
-                    </View>
-                    <View className="flex-1">
-                        <ThemedText className="text-lg font-bold mb-0.5">
-                            {item.categoryName || 'Unknown'}
-                        </ThemedText>
-                        <View className="flex-row items-center gap-2">
-                            <View className="px-2 py-0.5 rounded-md" style={{ backgroundColor: isIncome ? `${colors.success}20` : `${colors.error}20` }}>
-                                <ThemedText className="text-[11px] font-bold" style={{ color: isIncome ? colors.success : colors.error }}>
-                                    {isIncome ? 'INCOME' : 'EXPENSE'}
-                                </ThemedText>
-                            </View>
-                            <View className="px-2 py-0.5 rounded-md" style={{ borderWidth: 1, borderColor: colors.borderStrong }}>
-                                <ThemedText className="text-[11px] font-bold" style={{ color: colors.primary }}>
-                                    {FREQUENCY_LABELS[item.frequency] || item.frequency}
-                                </ThemedText>
-                            </View>
-                            {isPaused && (
-                                <View className="px-2 py-0.5 rounded-md" style={{ backgroundColor: `${colors.warning}20` }}>
-                                    <ThemedText className="text-[11px] font-bold" style={{ color: colors.warning }}>PAUSED</ThemedText>
-                                </View>
-                            )}
-                        </View>
-                    </View>
-                    <ThemedText className="text-lg font-bold" style={{ color: isIncome ? colors.success : colors.error, fontFamily: 'SpaceGrotesk_700Bold' }}>
-                        {isIncome ? '+' : '-'}{UserService.formatCurrency(item.amount, profile.currency)}
-                    </ThemedText>
-                </View>
-
-                {/* Info row */}
-                <View className="flex-row items-center mb-4 pl-[52px]">
-                    {item.accountName && (
-                        <View className="flex-row items-center mr-4">
-                            <Ionicons name="wallet-outline" size={12} color={colors.textMuted} />
-                            <ThemedText className="text-xs ml-1" style={{ color: colors.textMuted }}>{item.accountName}</ThemedText>
-                        </View>
-                    )}
-                    {item.notes && (
-                        <View className="flex-row items-center flex-1">
-                            <Ionicons name="document-text-outline" size={12} color={colors.textMuted} />
-                            <ThemedText className="text-xs ml-1 flex-1" style={{ color: colors.textMuted }} numberOfLines={1}>{item.notes}</ThemedText>
-                        </View>
-                    )}
-                </View>
-
-                {/* Action buttons */}
-                <View className="flex-row gap-2 pl-[52px]">
-                    <Pressable
-                        onPress={() => openEditModal(item)}
-                        className="flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl"
-                        style={{ backgroundColor: `${colors.primary}10` }}
-                    >
-                        <Ionicons name="create-outline" size={16} color={colors.primary} />
-                        <ThemedText className="text-xs font-bold" style={{ color: colors.primary }}>Edit</ThemedText>
-                    </Pressable>
-                    <Pressable
-                        onPress={() => handleToggleActive(item)}
-                        className="flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl"
-                        style={{ backgroundColor: isPaused ? `${colors.success}10` : `${colors.warning}10` }}
-                    >
-                        <Ionicons name={isPaused ? 'play' : 'pause'} size={16} color={isPaused ? colors.success : colors.warning} />
-                        <ThemedText className="text-xs font-bold" style={{ color: isPaused ? colors.success : colors.warning }}>
-                            {isPaused ? 'Resume' : 'Pause'}
-                        </ThemedText>
-                    </Pressable>
-                    <Pressable
-                        onPress={() => handleDelete(item)}
-                        className="flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl"
-                        style={{ backgroundColor: `${colors.error}10` }}
-                    >
-                        <Ionicons name="trash-outline" size={16} color={colors.expense} />
-                        <ThemedText className="text-xs font-bold" style={{ color: colors.expense }}>Delete</ThemedText>
-                    </Pressable>
-                </View>
-            </Animated.View>
-            </View>
-        );
-    };
+    const filteredItems = useMemo(() => items.filter(i => i.categoryType === activeTab), [items, activeTab]);
 
     return (
         <View className="flex-1" style={{ backgroundColor: colors.background }}>
-            <ScrollView
-                className="flex-1"
-                // Manual top inset only: combining it with automatic content
-                // inset adjustment doubled the inset on iOS.
-                style={{ paddingTop: insets.top }}
-                contentContainerStyle={{ paddingBottom: 100 }}
-                contentInsetAdjustmentBehavior="never"
-            >
+            {/* Header stays put; only the content below it scrolls */}
+            <View style={{ paddingTop: insets.top }}>
                 <ScreenHeader
                     title="Subscriptions & Bills"
                     right={
@@ -819,7 +280,12 @@ export default function RecurringScreen() {
                         </Pressable>
                     }
                 />
-
+            </View>
+            <ScrollView
+                className="flex-1"
+                contentContainerStyle={{ paddingBottom: 100 }}
+                contentInsetAdjustmentBehavior="never"
+            >
                 {/* Expense / Income Tabs */}
                 <SegmentedControl
                     options={[
@@ -843,13 +309,45 @@ export default function RecurringScreen() {
                     />
                 ) : (
                     <View className="px-5">
-                        {filteredItems.map((item, i) => renderItem(item, i))}
+                        {filteredItems.map((item, i) => (
+                            <RecurringRow
+                                key={item.id}
+                                item={item}
+                                index={i}
+                                currency={profile.currency}
+                                onEdit={openEditModal}
+                                onToggleActive={handleToggleActive}
+                                onDelete={handleDelete}
+                            />
+                        ))}
                     </View>
                 )}
             </ScrollView>
 
-            {renderAddModal()}
-            {renderEditModal()}
+            <RecurringFormModal
+                key={addFormKey}
+                visible={addModalVisible}
+                editItem={null}
+                type={activeTab}
+                categories={categories}
+                accounts={accounts}
+                currencySymbol={currencySymbol}
+                onClose={closeAddModal}
+                onSaved={handleAdded}
+            />
+            {editItem && (
+                <RecurringFormModal
+                    key={editItem.id}
+                    visible
+                    editItem={editItem}
+                    type={activeTab}
+                    categories={categories}
+                    accounts={accounts}
+                    currencySymbol={currencySymbol}
+                    onClose={closeEditModal}
+                    onSaved={handleEdited}
+                />
+            )}
             {deletingItem && (
                 <DeleteConfirmSheet
                     item={deletingItem}

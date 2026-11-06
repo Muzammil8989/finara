@@ -1,16 +1,18 @@
 import { Account, ensureDefaultAccount, getAccountsWithBalance } from '@/lib/db/queries';
 import { isDbReady } from '@/lib/db/db-client';
-import { useModals } from '@/providers/modal-context';
+import { useRefreshSignal, type RefreshDomain } from '@/providers/modal-context';
 import { logger } from '@/lib/logger';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { InteractionManager } from 'react-native';
+
+const REFRESH_DOMAINS = ['accounts', 'transactions'] as const satisfies readonly RefreshDomain[];
 
 export function useAccounts() {
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
     const mountedRef = useRef(true);
-    const { refreshSignal } = useModals();
+    const refreshSignal = useRefreshSignal(REFRESH_DOMAINS);
 
     useEffect(() => {
         mountedRef.current = true;

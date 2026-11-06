@@ -1,3 +1,4 @@
+import { MAX_CONTENT_WIDTH } from '@/hooks/use-content-width';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { ThemedText } from '@/components/common';
 import { shadows } from '@/theme/shadows';
@@ -51,7 +52,7 @@ export function FilterModal({
             <View className="flex-1 justify-end bg-black/50">
                 <View
                     className="rounded-t-3xl bg-surfaceAlt dark:bg-dark-surfaceAlt p-6 overflow-hidden"
-                    style={[shadows.lg, { maxHeight: '80%', paddingBottom: Math.max(insets.bottom + 16, 24) }]}
+                    style={[shadows.lg, { width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center', maxHeight: '80%', paddingBottom: Math.max(insets.bottom + 16, 24) }]}
                 >
                     {/* Handle */}
                     <View className="w-9 h-1 bg-borderStrong dark:bg-dark-borderStrong rounded-full mx-auto mb-5" />
