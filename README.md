@@ -6,7 +6,9 @@
 
 A private, offline-first personal finance app for iOS, Android and the web, built with Expo and React Native.
 
-[![CI](https://github.com/Muzammil8989/finara/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Muzammil8989/finara/actions/workflows/ci.yml)
+[![CI](https://github.com/Muzammil8989/folio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Muzammil8989/folio/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Muzammil8989/folio/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/Muzammil8989/folio/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Muzammil8989/folio/badge)](https://scorecard.dev/viewer/?uri=github.com/Muzammil8989/folio)
 [![License: MIT](https://img.shields.io/badge/License-MIT-0D5C63.svg)](LICENSE)
 [![Expo SDK 54](https://img.shields.io/badge/Expo-SDK%2054-000020?logo=expo)](https://docs.expo.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
@@ -52,8 +54,8 @@ All data is stored on the device in SQLite. The app does not need an account or 
 ### Install and run
 
 ```bash
-git clone https://github.com/Muzammil8989/finara.git
-cd finara
+git clone https://github.com/Muzammil8989/folio.git
+cd folio
 cp .env.example .env
 npm install
 npm start
@@ -105,7 +107,7 @@ Import feature code by deep path (for example `@/features/loans/hooks/use-loans`
 
 Contributions are welcome. Read the [contributing guide](CONTRIBUTING.md) before you open a pull request. All changes reach `main` through a reviewed pull request with passing CI.
 
-- Report a bug or request a feature: [open an issue](https://github.com/Muzammil8989/finara/issues/new/choose)
+- Report a bug or request a feature: [open an issue](https://github.com/Muzammil8989/folio/issues/new/choose)
 - Report a security problem: see [SECURITY.md](SECURITY.md)
 - Community standards: [Code of Conduct](CODE_OF_CONDUCT.md)
 
@@ -113,8 +115,8 @@ Contributions are welcome. Read the [contributing guide](CONTRIBUTING.md) before
 
 Thanks to everyone who has contributed to Folio.
 
-<a href="https://github.com/Muzammil8989/finara/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Muzammil8989/finara" alt="Contributors" />
+<a href="https://github.com/Muzammil8989/folio/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Muzammil8989/folio" alt="Contributors" />
 </a>
 
 ## License

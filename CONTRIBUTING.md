@@ -14,9 +14,9 @@ By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ```bash
 # Fork the repo on GitHub, then:
-git clone https://github.com/<your-username>/finara.git
-cd finara
-git remote add upstream https://github.com/Muzammil8989/finara.git
+git clone https://github.com/<your-username>/folio.git
+cd folio
+git remote add upstream https://github.com/Muzammil8989/folio.git
 nvm use            # Node 24, from .nvmrc
 cp .env.example .env
 npm install
@@ -91,7 +91,7 @@ Add or update tests for any behaviour you change. Tests live in `__tests__/`, wi
 
 ## Reporting bugs and requesting features
 
-Use the [issue templates](https://github.com/Muzammil8989/finara/issues/new/choose). For security problems, do not open a public issue. Follow [SECURITY.md](SECURITY.md) instead.
+Use the [issue templates](https://github.com/Muzammil8989/folio/issues/new/choose). For security problems, do not open a public issue. Follow [SECURITY.md](SECURITY.md) instead.
 
 ## For maintainers: protecting `main`
 
