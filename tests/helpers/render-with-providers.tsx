@@ -50,7 +50,7 @@ export async function renderWithProviders(
   }: { profile?: Partial<UserProfile>; secureStore?: Record<string, string> } & RenderOptions = {}
 ) {
   const store = installInMemorySecureStore({
-    finara_user_profile: JSON.stringify({ ...TEST_PROFILE, ...profile }),
+    folio_user_profile: JSON.stringify({ ...TEST_PROFILE, ...profile }),
     ...secureStore,
   });
   const result = render(ui, { wrapper: AppProviders, ...options });

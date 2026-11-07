@@ -59,9 +59,8 @@ produced by the same script.
 - **Brand / store name:** Folio
 - **Descriptor:** Folio — personal finance, kept privately on your phone
 - **In-app short form:** Folio
-- Internal identifiers (Android package `com.anonymous.Finara`, slug, URL scheme, storage
-  keys) intentionally still say "Finara": changing the package ID makes Android treat it as
-  a new app and existing users would lose their data.
+- Internal identifiers: Expo slug `folio`, URL scheme `folio://`, Android package
+  `com.anonymous.folio`, storage keys prefixed `folio_`, database `folio.db`.
 
 ## Regenerate
 ```bash

@@ -9,7 +9,7 @@ import { SecurityService } from '@/features/auth/services/security-service';
 import { Platform } from 'react-native';
 
 const PREF_KEY = 'notifications_enabled';
-const DAILY_REMINDER_ID = 'finara-daily-reminder';
+const DAILY_REMINDER_ID = 'folio-daily-reminder';
 // Legacy identifier from when the app was named "WealthFlow". Kept here only so
 // upgraded installs can cancel the stale schedule still sitting in the OS queue.
 const LEGACY_DAILY_REMINDER_ID = 'wf-daily-reminder';

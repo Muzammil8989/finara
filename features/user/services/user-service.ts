@@ -9,7 +9,7 @@ export interface UserProfile {
     isOnboarded: boolean;
 }
 
-const STORAGE_KEY = 'finara_user_profile';
+const STORAGE_KEY = 'folio_user_profile';
 const MAX_NAME_LENGTH = 50;
 
 const DEFAULT_PROFILE: UserProfile = {

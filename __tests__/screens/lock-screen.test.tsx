@@ -118,7 +118,7 @@ describe('Lock screen', () => {
     expect(await screen.findByText('App content')).toBeTruthy();
     expect(router.replace).toHaveBeenCalledWith('/onboarding');
     expect(secureStore.has('user_security_pin')).toBe(false);
-    expect(JSON.parse(secureStore.get('finara_user_profile')!).isOnboarded).toBe(false);
+    expect(JSON.parse(secureStore.get('folio_user_profile')!).isOnboarded).toBe(false);
     expect(db.raw.prepare('select count(*) c from transactions').get()).toEqual({ c: 0 });
   });
 

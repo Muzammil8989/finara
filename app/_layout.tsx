@@ -444,7 +444,7 @@ function DatabaseGate({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <SQLiteProvider key={attempt} databaseName="wealthflow.db" onInit={onInit} onError={setError}>
+    <SQLiteProvider key={attempt} databaseName="folio.db" onInit={onInit} onError={setError}>
       {children}
     </SQLiteProvider>
   );
