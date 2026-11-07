@@ -1,6 +1,6 @@
-# Wealthflow Database - Implementation Guide
+# Folio Database - Implementation Guide
 
-A complete, production-ready database solution for the Wealthflow React Native personal finance app.
+A complete, production-ready database solution for the Folio React Native personal finance app.
 
 ## 📦 What You're Getting
 
@@ -395,7 +395,7 @@ Located in `lib/db/db-client.ts`:
 
 ```typescript
 // Database file name
-const DB_NAME = 'wealthflow.db'; // Configurable
+const DB_NAME = 'folio.db'; // Configurable
 
 // Enable foreign keys (recommended)
 PRAGMA foreign_keys = ON;

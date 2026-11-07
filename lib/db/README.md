@@ -1,4 +1,4 @@
-# Wealthflow Database Schema
+# Folio Database Schema
 
 Comprehensive Drizzle ORM TypeScript schema for SQLite offline-first personal finance tracking app.
 

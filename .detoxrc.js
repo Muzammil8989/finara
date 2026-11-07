@@ -25,9 +25,9 @@ module.exports = {
     },
     'ios.debug': {
       type: 'ios.app',
-      binaryPath: 'ios/build/Build/Products/Debug-iphonesimulator/WealthFlow.app',
+      binaryPath: 'ios/build/Build/Products/Debug-iphonesimulator/Folio.app',
       build:
-        'xcodebuild -workspace ios/WealthFlow.xcworkspace -scheme WealthFlow -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build',
+        'xcodebuild -workspace ios/Folio.xcworkspace -scheme Folio -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build',
     },
   },
   devices: {

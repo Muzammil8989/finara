@@ -9,10 +9,10 @@ import { logger } from '@/lib/logger';
 import { NotificationService } from '@/features/notifications/services/notification-service';
 import { Platform } from 'react-native';
 
-const AUTO_BACKUP_KEY = 'finara_auto_backup_enabled';
-const LAST_BACKUP_KEY = 'finara_last_backup_time'; // last SUCCESSFUL backup (manual or auto)
-const LAST_AUTO_ATTEMPT_KEY = 'finara_last_auto_attempt'; // last auto-backup attempt (success or fail) — prevents retry loops
-const BACKUP_DIR_KEY = 'finara_backup_dir_uri';
+const AUTO_BACKUP_KEY = 'folio_auto_backup_enabled';
+const LAST_BACKUP_KEY = 'folio_last_backup_time'; // last SUCCESSFUL backup (manual or auto)
+const LAST_AUTO_ATTEMPT_KEY = 'folio_last_auto_attempt'; // last auto-backup attempt (success or fail) — prevents retry loops
+const BACKUP_DIR_KEY = 'folio_backup_dir_uri';
 const BACKUP_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
 // v2 adds loans, loan payments and household tables. v1 files still restore.
 const BACKUP_VERSION = 2;

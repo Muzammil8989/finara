@@ -7,7 +7,7 @@ const sha256 = require('js-sha256').sha256 as (input: string) => string;
 
 /** Original scheme: one SHA-256 with a salt shared by every install. Read-only, for upgrading. */
 function legacyHash(pin: string): string {
-    return sha256(pin + 'finara_salt_v1');
+    return sha256(pin + 'folio_salt_v1');
 }
 
 const HASH_ROUNDS = 10_000;

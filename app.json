@@ -1,11 +1,11 @@
 {
   "expo": {
     "name": "Folio",
-    "slug": "Finara",
+    "slug": "folio",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "finara",
+    "scheme": "folio",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -23,7 +23,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.Finara"
+      "package": "com.anonymous.folio"
     },
     "web": {
       "output": "static",
@@ -68,7 +68,8 @@
         {
           "android": {
             "enableProguardInReleaseBuilds": true,
-            "enableShrinkResourcesInReleaseBuilds": true
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "enableMinifyInReleaseBuilds": true
           }
         }
       ]
@@ -79,7 +80,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "a8264ff2-eadb-44d1-b1af-9862f7e2aaef"
+        "projectId": "89ca889c-5cf7-45bf-82a1-3e32f3dedb6a"
       }
     },
     "owner": "muzammil89890"

@@ -38,7 +38,7 @@ const SAF = FileSystem.StorageAccessFramework as unknown as {
 };
 const mockWrite = FileSystem.writeAsStringAsync as jest.Mock;
 
-const BACKUP_DIR_KEY = 'finara_backup_dir_uri';
+const BACKUP_DIR_KEY = 'folio_backup_dir_uri';
 
 beforeEach(() => {
     jest.clearAllMocks();

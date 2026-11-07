@@ -108,7 +108,7 @@ describe('PIN storage and verification', () => {
 
     it('accepts a PIN saved with the old scheme and upgrades it', async () => {
         const sha256 = require('js-sha256').sha256 as (s: string) => string;
-        store.set('user_security_pin', sha256('4321finara_salt_v1'));
+        store.set('user_security_pin', sha256('4321folio_salt_v1'));
         expect(await SecurityService.verifyPin('4321')).toBe(true);
         expect(store.get('user_security_pin')).toMatch(/^v2\$/);
         expect(await SecurityService.verifyPin('4321')).toBe(true);

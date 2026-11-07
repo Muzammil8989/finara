@@ -5,8 +5,8 @@
  * Usage:
  * 1. Stop your Expo development server
  * 2. Delete the database file manually:
- *    - iOS Simulator: ~/Library/Developer/CoreSimulator/Devices/[DEVICE_ID]/data/Containers/Data/Application/[APP_ID]/Library/LocalDatabase/wealthflow.db
- *    - Android Emulator: /data/data/[PACKAGE_NAME]/databases/wealthflow.db
+ *    - iOS Simulator: ~/Library/Developer/CoreSimulator/Devices/[DEVICE_ID]/data/Containers/Data/Application/[APP_ID]/Library/LocalDatabase/folio.db
+ *    - Android Emulator: /data/data/[PACKAGE_NAME]/databases/folio.db
  *    - Or use the app's internal reset (recommended)
  * 3. Restart the app - it will recreate everything from scratch
  *

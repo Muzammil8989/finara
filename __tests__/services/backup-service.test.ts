@@ -35,9 +35,9 @@ const mockGetItem = SecureStore.getItemAsync as jest.Mock;
 const mockSetItem = SecureStore.setItemAsync as jest.Mock;
 const mockSendBackupComplete = NotificationService.sendBackupComplete as jest.Mock;
 
-const AUTO_BACKUP_KEY = 'finara_auto_backup_enabled';
-const LAST_BACKUP_KEY = 'finara_last_backup_time';
-const LAST_AUTO_ATTEMPT_KEY = 'finara_last_auto_attempt';
+const AUTO_BACKUP_KEY = 'folio_auto_backup_enabled';
+const LAST_BACKUP_KEY = 'folio_last_backup_time';
+const LAST_AUTO_ATTEMPT_KEY = 'folio_last_auto_attempt';
 
 /** Build a SecureStore.getItemAsync mock from a key→value map. */
 function secureStore(values: Record<string, string | null>) {

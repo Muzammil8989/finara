@@ -1,4 +1,4 @@
-// Finara icon generator — uses expo-icon.png (transparent logo, 1024x1024).
+// Folio icon generator — uses expo-icon.png (transparent logo, 1024x1024).
 // Run: node scripts/generate-icons.js
 
 const sharp = require('sharp');
@@ -71,7 +71,7 @@ async function generate() {
     .toFile(path.join(OUT, 'android-icon-monochrome.png'));
   console.log('  ✓ android-icon-monochrome.png  1024×1024  (transparent)');
 
-  console.log('\nAll Finara assets generated ✓');
+  console.log('\nAll Folio assets generated ✓');
 }
 
 generate().catch((err) => { console.error(err); process.exit(1); });
