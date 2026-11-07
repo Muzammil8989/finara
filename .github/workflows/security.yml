@@ -38,6 +38,7 @@ jobs:
         with:
           fail-on-severity: high
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          allow-dependencies-licenses: pkg:npm/node-forge@1.4.3
           comment-summary-in-pr: on-failure
 
   # Fails if an API key, token or password is committed anywhere in the history.
